@@ -4,12 +4,12 @@ title: About
 permalink: /about/
 ---
 
-This is the base Jekyll theme. You can find out more info about customizing your Jekyll theme, as well as basic Jekyll usage documentation at [jekyllrb.com](http://jekyllrb.com/)
+This blog documents the construction of a safe Rust API for the
+[Teensy](https://pjrc.com/teensy/) boards. The goal is to help teach
+you how to use existing C implementations and manufacturer's
+documentation to build your own embedded applications.
 
-You can find the source code for the Jekyll new theme at:
-{% include icon-github.html username="jekyll" %} /
-[minima](https://github.com/jekyll/minima)
-
-You can find the source code for Jekyll at
-{% include icon-github.html username="jekyll" %} /
-[jekyll](https://github.com/jekyll/jekyll)
+The Teensy boards are readily available ARM Cortex-M development
+boards. Their normal development environment is the Arduino IDE. We'll
+be bypassing that entirely, going straight to the low-level hardware
+registers.
