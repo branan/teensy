@@ -49,17 +49,31 @@ impl Port {
         Pin { port: myself, pin: p }
     }
 
-    pub unsafe fn ctrls(& mut self) -> & mut[u32] {
-        &mut self.pcr
+    pub fn set_pin_mode(&mut self, p: u32, mut mode: u32) {
+        unsafe {
+            let mut pcr = core::ptr::read_volatile(&self.pcr[p as usize]);
+            pcr &= 0xFFFFF8FF;
+            mode &= 0x00000007;
+            mode <<= 8;
+            pcr |= mode;
+            core::ptr::write_volatile(&mut self.pcr[p as usize], pcr);
+        }
+    }
+
+    pub fn name(&self) -> PortName {
+        let addr = (self as *const Port) as u32;
+        match addr {
+            0x4004B000 => PortName::C,
+            _ => unreachable!()
+        }
     }
 }
 
 impl Pin {
     pub fn make_gpio(self) -> Gpio {
         unsafe {
-            let mut ctrl = &mut self.port.ctrls()[self.pin as usize];
-            core::ptr::write_volatile(ctrl, 0x00000100);
-            Gpio::new(PortName::C, 5)
+            self.port.set_pin_mode(self.pin, 1);
+            Gpio::new(self.port.name(), self.pin)
         }
     }
 }
