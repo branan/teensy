@@ -263,8 +263,8 @@ The linker script looks like this:
 ```
 MEMORY
 {
-	FLASH (rx) : ORIGIN = 0x00000000, LENGTH = 256K
-	RAM  (rwx) : ORIGIN = 0x1FFF8000, LENGTH = 64K
+    FLASH (rx) : ORIGIN = 0x00000000, LENGTH = 256K
+    RAM  (rwx) : ORIGIN = 0x1FFF8000, LENGTH = 64K
 }
 
 SECTIONS
@@ -444,7 +444,7 @@ impl Sim {
             match clock {
                 Clock::PortC => {
                     let mut scgc = core::ptr::read_volatile(&mut self.scgc5);
-                    scgc |= 0x00000800;
+                    scgc |= 1<<8;
                     core::ptr::write_volatile(&mut self.scgc5, scgc);
                 }
             }
@@ -452,6 +452,9 @@ impl Sim {
     }
 }
 {% endhighlight %}
+
+Each clock is controlled by a bit in one of the System Clock Gate
+Control (SCGC) registers. For Port C, we set the 9th bit of SCGC5.
 
 For now, this only handles enabling the clock for Port C. Each block
 of functionality in our μC can be enabled separately. We'll update
@@ -574,7 +577,8 @@ impl<'a> Pin<'a> {
 We've added two new functions to `Port`. The first lets us set which
 mode a pin is in. The pin mode is a 3-bit value that controls which
 internal hardware device a given pin is connected to. Most values are
-pin-specific, but mode 1 is always GPIO. The other new function lets
+pin-specific, but mode 1 is always GPIO. This field is in bits 8-10 of
+the pin's "Pin Control Register", or PCR. The other new function lets
 us get back to a PortName enum from a port reference. We use this to
 associate a pin with its GPIO control registers.
 
@@ -608,6 +612,8 @@ impl Gpio {
 
     pub fn output(&mut self) {
         unsafe {
+            let mut pddr = core::ptr::read_volatile(&mut self.gpio.pddr);
+            pddr |= 1 << self.pin;
             core::ptr::write_volatile(&mut self.gpio.pddr, 1 << self.pin);
         }
     }
@@ -630,7 +636,13 @@ which represents a single pin.
 
 The `Gpio` impls allow setting a pin as an output, and then setting it
 as "high". This is a subset of the real GPIO functionality, but is all
-that we need to enable the Teensy's LED.
+that we need to enable the Teensy's LED. Output mode is set with the
+Port Data Direction Register (PDDR), and the output is made high with
+the Port Set Outout Register. To be safe, we must ensure that we don't
+change other bits of the PDDR, as they are used to control other
+pins. This same constraint does not apply to the PSOR - writing zeros
+to the PSOR does not affect the pin state. Turning a pin off is done
+with the Port Clear Output Register (PCOR).
 
 ## Putting it Together
 
