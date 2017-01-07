@@ -17,7 +17,6 @@ GEM
       pathutil (~> 0.9)
       rouge (~> 1.7)
       safe_yaml (~> 1.0)
-    jekyll-athena (0.0.2)
     jekyll-feed (0.8.0)
       jekyll (~> 3.3)
     jekyll-sass-converter (1.5.0)
@@ -30,6 +29,8 @@ GEM
       rb-fsevent (~> 0.9, >= 0.9.4)
       rb-inotify (~> 0.9, >= 0.9.7)
     mercenary (0.3.6)
+    minima (2.1.0)
+      jekyll (~> 3.3)
     pathutil (0.14.0)
       forwardable-extended (~> 2.6)
     public_suffix (2.0.5)
@@ -45,8 +46,8 @@ PLATFORMS
 
 DEPENDENCIES
   jekyll (= 3.3.1)
-  jekyll-athena
   jekyll-feed (~> 0.6)
+  minima (~> 2.0)
 
 BUNDLED WITH
    1.11.2
