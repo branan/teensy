@@ -13,10 +13,20 @@ goal of this tutorial series is to teach how to build safe hardware
 abstractions in Rust. As such, existing libraries for embedded devices
 will not be used.
 
+The Teensy 3.x boards use μCs in the same family. Much of what's in
+this series will be applicable to all of them, and you can probably
+follow along if you're willing to read the datasheet for your
+board. I'll try to call out where things might be different for other
+chips, but you'll have the best luck using the Teensy 3.1 or 3.2 that
+the tutorials are written for.
+
 This tutorial is written mostly for Linux; specifically Arch. You may
-have to adjust paths for other OSes, or even for other Linux
+have to adjust commands for other OSes, or even for other Linux
 distros. If anything is broken for you, please feel free to [file an
 issue][gh-issue] on GitHub.
+
+[teensy]: https://pjrc.com/teensy/
+[gh-issue]: https://github.com/branan/teensy/issues
 
 # Overview
 
@@ -49,7 +59,7 @@ also have to disable the *watchdog* and enable the appropriate
 *clock*. The watchdog is a special circuit in the μC that makes sure a
 program is continuing to execute as intended. It's actually very
 useful in real-world embedded development, but for this tutorial it
-creates too much complexity, so we'll turn it off.We'll discuss
+creates too much complexity, so we'll turn it off. We'll discuss
 *clocks* in-depth in a future post. For now, think of them as on-off
 switches for a given piece of chip functionality.
 
@@ -66,7 +76,7 @@ around Cargo that provides some extra smarts when cross-compiling.
 $ cargo install xargo
 {% endhighlight %}
 
-Once installed, Xargo is available at `~/.cargo/bin/xargo`. It's not
+Once installed, xargo is available at `~/.cargo/bin/xargo`. It's not
 necessary to put this on your `PATH` for this tutorial series, as
 we'll be using a Makefile to call it.
 
@@ -80,7 +90,7 @@ $ rustup component add rust-src
 
 We'll also need Rust nightly. This series does not use any unstable
 language features, but a nightly Rust is required in order to
-implement [lang items][lang-item], as well as for the occasional bits
+implement [lang items][lang-items], as well as for the occasional bits
 of inline assembly that embedded development requires. This makes
 nightlies necessary for all embedded development in Rust.
 
@@ -95,6 +105,9 @@ system. For my particular Linux distribution (Arch), I simply ran:
 {% highlight shell %}
 $ sudo pacman -S arm-none-eabi-gcc
 {% endhighlight %}
+
+[xargo]: https://github.com/japaric/xargo
+[lang-items]: https://doc.rust-lang.org/book/lang-items.html
 
 # Getting Started
 
@@ -130,7 +143,7 @@ world.
 The other changes to `src/main.rs` are also for the needs of embedded
 development. The `no_main` attribute tells `rustc` to skip its normal
 shim around the main function. This shim typically handles things like
-parsing arguments which, like filesystems, do not exist in our
+command-line arguments which, like filesystems, do not exist in our
 emebedded world. Our main function is now marked `no_mangle` and `pub
 extern`. This set of flags amounts to telling the Rust compiler, "Make
 our main function look exactly like a C function". This is needed to
@@ -442,7 +455,7 @@ impl Sim {
 
 For now, this only handles enabling the clock for Port C. Each block
 of functionality in our μC can be enabled separately. We'll update
-this file as we need additional bits of hardware.
+this file as each piece of functionality is required.
 
 ## I/O Ports
 
@@ -487,8 +500,6 @@ impl Port {
             PortName::C => 0x4004B000 as *mut Port
         }
     }
-
-
 }
 {% endhighlight %}
 
@@ -505,28 +516,22 @@ I/O pin, put it in GPIO (General Purpose I/O) mode, and switch it to a
 2. Use something similar to `RefCell`, where we panic if there is a
    conflict in how pins are used.
 
-For now, we'll use the first way - flag it all as unsafe. In a future
-post, we will explore how to expand the pin API to enforce safety at
-run time. We'll add the following to `src/port.rs`:
+For now, we'll use the first way - flag pin creation as unsafe. In a
+future post, we will explore how to expand the pin API to enforce
+safety at run time. We'll add the following to `src/port.rs`:
 
 {% highlight rust %}
-pub struct Pin {
-    port: &'static Port,
+pub struct Pin<'a> {
+    port: &'a mut Port,
     pin: u32
 }
 
 impl Port {
      pub unsafe fn pin(&mut self, p: u32) -> Pin {
-        let myself = &mut * (self as *mut Port);
-        Pin { port: myself, pin: p }
+        Pin { port: self, pin: p }
     }
 }
 {% endhighlight %}
-
-The cast back-and-forth between reference, pointer, and reference
-converts our generic `self` reference to a static one. This is safe
-for us, since we know that any given `Port` instance points to
-somewhere in the μC's configuration space, and is thus static.
 
 Now that we can get a pin, we need to be able to switch it to GPIO
 output, and turn it on. We'll add that to the `Pin` impl in
@@ -535,15 +540,43 @@ the Pin object is consumed. This is intentional - it ensures that the
 pin cannot be re-used for another purpose.
 
 {% highlight rust %}
-impl Pin {
+impl Port {
+    pub fn set_pin_mode(&mut self, p: u32, mut mode: u32) {
+        unsafe {
+            let mut pcr = core::ptr::read_volatile(&self.pcr[p as usize]);
+            pcr &= 0xFFFFF8FF;
+            mode &= 0x00000007;
+            mode <<= 8;
+            pcr |= mode;
+            core::ptr::write_volatile(&mut self.pcr[p as usize], pcr);
+        }
+    }
+
+    pub fn name(&self) -> PortName {
+        let addr = (self as *const Port) as u32;
+        match addr {
+            0x4004B000 => PortName::C,
+            _ => unreachable!()
+        }
+    }
+}
+
+impl<'a> Pin<'a> {
     pub fn make_gpio(self) -> Gpio {
         unsafe {
-            self.port.ctrls()[self.pin as usize] = 0x00000100;
-            Gpio::new(PortName::C, 5)
+            self.port.set_pin_mode(self.pin, 1);
+            Gpio::new(self.port.name(), self.pin)
         }
     }
 }
 {% endhighlight %}
+
+We've added two new functions to `Port`. The first lets us set which
+mode a pin is in. The pin mode is a 3-bit value that controls which
+internal hardware device a given pin is connected to. Most values are
+pin-specific, but mode 1 is always GPIO. The other new function lets
+us get back to a PortName enum from a port reference. We use this to
+associate a pin with its GPIO control registers.
 
 The new `Gpio` struct represents a single pin that is acting as a GPIO
 device.
