@@ -1,4 +1,6 @@
-#![feature(lang_items,asm)]
+#![feature(lang_items,asm,plugin)]
+#![plugin(clippy)]
+#![deny(warnings)]
 #![no_std]
 #![no_main]
 
@@ -7,6 +9,7 @@ mod sim;
 mod watchdog;
 
 #[no_mangle]
+#[allow(empty_loop)]
 pub extern fn main() {
     let (wdog,sim,pin) = unsafe {
         (watchdog::Watchdog::new(),
@@ -45,6 +48,7 @@ pub static _FLASHCONFIG: [u8; 16] = [
 
 #[lang = "panic_fmt"]
 #[no_mangle]
+#[allow(empty_loop)]
 pub extern fn rust_begin_panic(_msg: core::fmt::Arguments,
                                _file: &'static str,
                                _line: u32) -> ! {

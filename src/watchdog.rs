@@ -27,7 +27,7 @@ impl Watchdog {
             core::ptr::write_volatile(&mut self.unlock, 0xD928);
             asm!("nop" : : : "memory");
             asm!("nop" : : : "memory");
-            let mut ctrl = core::ptr::read_volatile(&mut self.stctrlh);
+            let mut ctrl = core::ptr::read_volatile(&self.stctrlh);
             ctrl &= !(0x00000001);
             core::ptr::write_volatile(&mut self.stctrlh, ctrl);
         }
