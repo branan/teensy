@@ -8,9 +8,8 @@ mod port;
 mod sim;
 mod watchdog;
 
-#[no_mangle]
 #[allow(empty_loop)]
-pub extern fn main() {
+extern fn main() {
     let (wdog,sim,pin) = unsafe {
         (watchdog::Watchdog::new(),
          sim::Sim::new(),
