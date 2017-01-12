@@ -16,4 +16,8 @@ SECTIONS
     } > FLASH = 0xFF
 
     _stack_top = ORIGIN(RAM) + LENGTH(RAM);
+
+    /DISCARD/ : {
+        *(.ARM.*)
+    }
 }

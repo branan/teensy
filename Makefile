@@ -6,7 +6,7 @@ ELF=$(OUTDIR)/$(BIN)
 all:: $(HEX)
 
 $(HEX): $(ELF)
-	arm-none-eabi-objcopy -R .stack -O ihex $(ELF) $(HEX)
+	arm-none-eabi-objcopy -O ihex $(ELF) $(HEX)
 
 .PHONY: $(ELF)
 $(ELF):

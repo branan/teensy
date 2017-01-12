@@ -48,15 +48,13 @@ impl Port {
         Pin { port: self, pin: p }
     }
 
-    pub fn set_pin_mode(&mut self, p: u32, mut mode: u32) {
-        unsafe {
-            let mut pcr = core::ptr::read_volatile(&self.pcr[p as usize]);
-            pcr &= 0xFFFFF8FF;
-            mode &= 0x00000007;
-            mode <<= 8;
-            pcr |= mode;
-            core::ptr::write_volatile(&mut self.pcr[p as usize], pcr);
-        }
+    pub unsafe fn set_pin_mode(&mut self, p: u32, mut mode: u32) {
+        let mut pcr = core::ptr::read_volatile(&self.pcr[p as usize]);
+        pcr &= 0xFFFFF8FF;
+        mode &= 0x00000007;
+        mode <<= 8;
+        pcr |= mode;
+        core::ptr::write_volatile(&mut self.pcr[p as usize], pcr);
     }
 
     pub fn name(&self) -> PortName {
