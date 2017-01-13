@@ -22,19 +22,9 @@ pub struct Pin<'a> {
     pin: u32
 }
 
-#[repr(C,packed)]
-pub struct _Gpio {
-    pdor: u32,
-    psor: u32,
-    pcor: u32,
-    ptor: u32,
-    pdir: u32,
-    pddr: u32
-}
-
 pub struct Gpio {
-    gpio: &'static mut _Gpio,
-    pin: u32
+    pddr: &'static mut u32,
+    psor: &'static mut u32
 }
 
 impl Port {
@@ -77,24 +67,28 @@ impl<'a> Pin<'a> {
 
 impl Gpio {
     pub unsafe fn new(port: PortName, pin: u32) -> Gpio {
-        let addr = match port {
-            PortName::C => 0x400FF080 as *mut _Gpio
+        let gpio_base = match port {
+            PortName::C => 0x43FE1000
         };
 
-        Gpio { gpio: &mut *addr, pin: pin }
+        // PSOR is the second field of the GPIO struct.
+        // PDDR is the 6thh field. (zero indexed)
+        // Each field is 128 bytes long
+        // That is: 32 pins, each taking up 32 bits (4 bytes)
+        let psor = (gpio_base + 1 * 0x80 + pin) as *mut u32;
+        let pddr = (gpio_base + 5 * 0x80 + pin) as *mut u32;
+        Gpio { psor: &mut *psor, pddr: &mut *pddr }
     }
 
     pub fn output(&mut self) {
         unsafe {
-            let mut pddr = core::ptr::read_volatile(&self.gpio.pddr);
-            pddr |= 1 << self.pin;
-            core::ptr::write_volatile(&mut self.gpio.pddr, pddr);
+            core::ptr::write_volatile(self.pddr, 1);
         }
     }
 
     pub fn high(&mut self) {
         unsafe {
-            core::ptr::write_volatile(&mut self.gpio.psor, 1 << self.pin);
+            core::ptr::write_volatile(self.psor, 1);
         }
     }
 }
