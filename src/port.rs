@@ -17,8 +17,8 @@ pub struct Port {
     dfwr: u32
 }
 
-pub struct Pin<'a> {
-    port: &'a mut Port,
+pub struct Pin {
+    port: &'static mut Port,
     pin: u32
 }
 
@@ -35,7 +35,8 @@ impl Port {
     }
 
     pub unsafe fn pin(&mut self, p: u32) -> Pin {
-        Pin { port: self, pin: p }
+        let myself = &mut *(self as *mut Port);
+        Pin { port: myself, pin: p }
     }
 
     pub unsafe fn set_pin_mode(&mut self, p: u32, mut mode: u32) {
@@ -56,7 +57,7 @@ impl Port {
     }
 }
 
-impl<'a> Pin<'a> {
+impl Pin {
     pub fn make_gpio(self) -> Gpio {
         unsafe {
             self.port.set_pin_mode(self.pin, 1);
@@ -75,8 +76,8 @@ impl Gpio {
         // PDDR is the 6thh field. (zero indexed)
         // Each field is 128 bytes long
         // That is: 32 pins, each taking up 32 bits (4 bytes)
-        let psor = (gpio_base + 1 * 0x80 + pin) as *mut u32;
-        let pddr = (gpio_base + 5 * 0x80 + pin) as *mut u32;
+        let psor = (gpio_base + 0x0080 + pin) as *mut u32;
+        let pddr = (gpio_base + 0x0280 + pin) as *mut u32;
         Gpio { psor: &mut *psor, pddr: &mut *pddr }
     }
 
