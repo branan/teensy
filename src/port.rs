@@ -76,8 +76,9 @@ impl Gpio {
         // PDDR is the 6thh field. (zero indexed)
         // Each field is 128 bytes long
         // That is: 32 pins, each taking up 32 bits (4 bytes)
-        let psor = (gpio_base + 0x0080 + pin) as *mut u32;
-        let pddr = (gpio_base + 0x0280 + pin) as *mut u32;
+        // Each field is further offset by the pin number
+        let psor = (gpio_base + 0x0080 + pin * 4) as *mut u32;
+        let pddr = (gpio_base + 0x0280 + pin * 4) as *mut u32;
         Gpio { psor: &mut *psor, pddr: &mut *pddr }
     }
 
