@@ -18,7 +18,7 @@ pub struct Port {
 }
 
 pub struct Pin {
-    port: &'static mut Port,
+    port: *mut Port,
     pin: u32
 }
 
@@ -35,8 +35,7 @@ impl Port {
     }
 
     pub unsafe fn pin(&mut self, p: u32) -> Pin {
-        let myself = &mut *(self as *mut Port);
-        Pin { port: myself, pin: p }
+        Pin { port: self, pin: p }
     }
 
     pub unsafe fn set_pin_mode(&mut self, p: u32, mut mode: u32) {
@@ -60,8 +59,9 @@ impl Port {
 impl Pin {
     pub fn make_gpio(self) -> Gpio {
         unsafe {
-            self.port.set_pin_mode(self.pin, 1);
-            Gpio::new(self.port.name(), self.pin)
+            let port = &mut *self.port;
+            port.set_pin_mode(self.pin, 1);
+            Gpio::new(port.name(), self.pin)
         }
     }
 }
