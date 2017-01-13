@@ -63,13 +63,12 @@ create safe interfaces for these unsafe memory accesses.
 
 ## Development Environment
 
-Currently, development environment requires the use of nightly
+Currently, embedded development requires the use of nightly
 Rust. Nightly is needed for implementing [language items][lang-items],
 as well as for any inline assembly we use. We'll use [Rustup][rustup]
 to install nightly Rust. We will also rely on a tool called
 [xargo][xargo] to help with some of the complexity involved in
-targeting an embedded environment. Xargo can be installed using
-cargo.
+targeting an embedded environment. Xargo can be installed using cargo.
 
 {% highlight shell %}
 $ rustup component add rust-src
@@ -90,9 +89,15 @@ system. For Arch, it looks like this:
 $ sudo pacman -S arm-none-eabi-gcc
 {% endhighlight %}
 
+Finally, you'll want to get the [Teensy Loader][teensy-loader]. This
+is a small command line tool that handles flashing a program to the
+Teensy. If you are on Linux, it may also be available through your
+package manager.
+
 [rustup]: https://rustup.rs/
 [xargo]: https://github.com/japaric/xargo
 [lang-items]: https://doc.rust-lang.org/book/lang-items.html
+[teensy-loader]: https://www.pjrc.com/teensy/loader_cli.html
 
 ## Code Overview
 
@@ -232,12 +237,13 @@ function so that our _VECTORS array is easier to write. Fortunately
 calling it from our own code is unsafe, so we can be pretty sure that
 only the hardware will read these values.
 
-## Linking
+## Compiling and Linking
 
 Our program now contains the important data tables, as well as a
-`main` that can be called by the microcontroller. We now turn our
-attention to laying out this code and data in the Teensy's flash
-memory. This is done with a *linker script*.
+`main` that can be called by the microcontroller. We will now turn our
+attention to building the project for the Teensy. We'll use a Makefile
+to handle the build process. Laying out the code and data in the
+Teensy's flash memory is done with a *linker script*.
 
 ### Linker Scripts
 
@@ -306,16 +312,56 @@ This also adds the `-nostartfiles` flag. This is the linker's
 equivalent of Rust's `no_std`, disabling functionality that depends on
 an operating system.
 
-At this point, we could compile our project and flash it to a
-Teensy. Sadly, it would do nothing interesting - we wouldn't even be
-able to tell if it was running. In the next section we'll expand our
-code to do something more useful.
+### The Makefile
+
+Building our project is a three-step process:
+
+* Use xargo to compile the rust code for the target processor
+* Convert the built program to the right format with objcopy
+* Flash our code to the Teensy with teensy-loader-cli
+
+This sort of repetitive sequenced work is exactly what Makefiles were
+designed for. Ours isn't particularly complicated:
+
+{% highlight make %}
+BIN=teensy
+OUTDIR=target/thumbv7em-none-eabi/release
+HEX=$(OUTDIR)/$(BIN).hex
+ELF=$(OUTDIR)/$(BIN)
+
+all:: $(ELF)
+
+.PHONY: $(ELF)
+$(ELF):
+	~/.cargo/bin/xargo build --target=thumbv7em-none-eabi --release
+
+$(HEX): $(ELF)
+	arm-none-eabi-objcopy -O ihex $(ELF) $(HEX)
+
+.PHONY: flash
+flash: $(HEX)
+	teensy-loader-cli -w -mmcu=mk20dx256 $(HEX) -v
+{% endhighlight %}
+
+The targets marked *.PHONY* will always be built by make, even if it
+thinks they are up-to-date. This is needed for the ELF target, since
+its dependencies are managed by cargo. We also add it to the flash
+target so that make will still flash our image even if someone creates
+a file called "flash".
+
+Running `make` will build our project. `make flash` will install it to
+a Teensy.
+
+At this point, we can compile our project and flash it to a
+Teensy. Sadly, it does nothing interesting - we wouldn't even be able
+to tell if it was running. In the next section we'll expand our code
+to do something more useful.
 
 ## Accessing The Hardware
 
 Our first steps here will be some basic hardware initialization
-tasks. We'll build accessors for the watchdog and for the /System
-Integration Module/, or SIM. The SIM handles clock gating as well as
+tasks. We'll build accessors for the watchdog and for the *System
+Integration Module*, or SIM. The SIM handles clock gating as well as
 most other global configuration of the microcontroller. Once we have
 those in place, we'll turn to the I/O functions necessary to turn on
 the LED.
@@ -371,8 +417,8 @@ additional invariants. For example, requiring that a certain value be
 written to a watchdog register during your main loop. This is not a
 memory safety issue, and thus strictly falls outside of Rust's idea of
 safety. It could cause correctness issues, though, and good API design
-will try to minimize correctness errors - even if they're strictly
-safe.
+will try to minimize correctness errors - even if they're technically
+"safe".
 
 The watchdog's implementation looks like this. Note that `new` is
 unsafe, but `disable` is safe.
@@ -406,6 +452,13 @@ actually unlock itself. The `nop` assembly instruction tells the
 processor to briefly do nothing. This introduces our necessary 2-cycle
 delay. Finally, we read the control register and un-set the "enable"
 bit.
+
+All of our memory access are *volatile*. This tells the Rust compiler
+that the read (or write) has an effect that it can't see from our
+program code. In this case, that effect is a hardware access. Without
+marking our memory accesses volatile, the Rust compiler would be free
+to say "You never read from `unlock`, so I will optimize away the
+unneeded write to it". This would, naturally, cause our code to fail.
 
 This disable process shows why we must have only one mutable reference
 to the watchdog. If an interrupt were to occur partway through this
@@ -612,7 +665,8 @@ struct Gpio {
 This is very convenient to work with, but has an unfortunate
 flaw. Each of the fields represents all 32 pins in a Port. This means
 that any pin changes are subject to a race condition during our
-read/modify/write process.
+read/modify/write process. Pins that are owned by a separate piece of
+code can have an impact on how our pin behaves.
 
 Fortunately, ARM has a solution to this. We will take advantage of the
 *bit-band alias*. Bit-banding is a feature of certain ARM processors
@@ -636,8 +690,8 @@ struct GpioBitband {
 
 This is what we will use to control the GPIO. Just like with Pins and
 the PCR registers, we will have individual GPIO structures that
-represent a single GPIO access. They will ensure safety by only
-writing to the words associated with their pin index. Let's look at
+represent a single GPIO pin. They will ensure safety by only writing
+to the register words associated with their pin index. Let's look at
 all that code now, then walk through it.
 
 {% highlight rust %}
@@ -700,8 +754,7 @@ create.
 Converting a Pin into a Gpio consumes the Pin. This prevents having
 more than one reference to a single hardware pin. Getting another copy
 of a pin from the port is unsafe, so we can be confident that safe
-code will not ever make a second copy of a pin that is in use as a
-GPIO.
+code will never make a second copy of a pin that is in use as a GPIO.
 
 ## Putting it Together
 
@@ -716,6 +769,10 @@ beginning, our application will do the following:
 This all ends up being surprisingly short in main:
 
 {% highlight rust %}
+mod port;
+mod sim;
+mod watchdog;
+
 extern fn main() {
     let (wdog,sim,pin) = unsafe {
         (watchdog::Watchdog::new(),
@@ -740,11 +797,18 @@ various register blocks. Creating these is always unsafe, since more
 than one would violate Rust's memory safety rules. The rest of the
 code is 100% safe.
 
+It's finally time to send our first pure-rust embedded program to the
+Teensy! Connect your Teensy to a USB port, then run `make flash`. You
+should see the LED on the Teensy light up once the process is
+complete. If it doesn't, double-check your linker script, and the link
+sections of the _VECTORS and _FLASHCONFIG arrays. You might also
+double-check the addresses of the register blocks.
+
 Our next post will look at enabling a UART for serial
 communication. This will give us access to real panic messages. We'll
-take advantage of our ability to panic to create APIs that use Rust's
-type system to remove even the small amount of unsafe code currently
-used.
+take advantage of panics to enforce some of our rules about duplicate
+pins, similar to how Rust's `RefCell` panics on duplicate mutable
+accesses.
 
 <sup>1</sup> All genuine Teensys have an orange LED. If yours has a
 different color, I'm sad to say it's a knockoff.
