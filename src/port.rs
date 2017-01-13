@@ -19,12 +19,22 @@ pub struct Port {
 
 pub struct Pin {
     port: *mut Port,
-    pin: u32
+    pin: usize
+}
+
+#[repr(C,packed)]
+struct GpioBitband {
+    pdor: [u32; 32],
+    psor: [u32; 32],
+    pcor: [u32; 32],
+    ptor: [u32; 32],
+    pdir: [u32; 32],
+    pddr: [u32; 32]
 }
 
 pub struct Gpio {
-    pddr: &'static mut u32,
-    psor: &'static mut u32
+    gpio: *mut GpioBitband,
+    pin: usize
 }
 
 impl Port {
@@ -34,17 +44,17 @@ impl Port {
         }
     }
 
-    pub unsafe fn pin(&mut self, p: u32) -> Pin {
+    pub unsafe fn pin(&mut self, p: usize) -> Pin {
         Pin { port: self, pin: p }
     }
 
-    pub unsafe fn set_pin_mode(&mut self, p: u32, mut mode: u32) {
-        let mut pcr = core::ptr::read_volatile(&self.pcr[p as usize]);
+    pub unsafe fn set_pin_mode(&mut self, p: usize, mut mode: u32) {
+        let mut pcr = core::ptr::read_volatile(&self.pcr[p]);
         pcr &= 0xFFFFF8FF;
         mode &= 0x00000007;
         mode <<= 8;
         pcr |= mode;
-        core::ptr::write_volatile(&mut self.pcr[p as usize], pcr);
+        core::ptr::write_volatile(&mut self.pcr[p], pcr);
     }
 
     pub fn name(&self) -> PortName {
@@ -67,30 +77,23 @@ impl Pin {
 }
 
 impl Gpio {
-    pub unsafe fn new(port: PortName, pin: u32) -> Gpio {
-        let gpio_base = match port {
-            PortName::C => 0x43FE1000
+    pub unsafe fn new(port: PortName, pin: usize) -> Gpio {
+        let gpio = match port {
+            PortName::C => 0x43FE1000 as *mut GpioBitband
         };
 
-        // PSOR is the second field of the GPIO struct.
-        // PDDR is the 6thh field. (zero indexed)
-        // Each field is 128 bytes long
-        // That is: 32 pins, each taking up 32 bits (4 bytes)
-        // Each field is further offset by the pin number
-        let psor = (gpio_base + 0x0080 + pin * 4) as *mut u32;
-        let pddr = (gpio_base + 0x0280 + pin * 4) as *mut u32;
-        Gpio { psor: &mut *psor, pddr: &mut *pddr }
+        Gpio { gpio: gpio, pin: pin }
     }
 
     pub fn output(&mut self) {
         unsafe {
-            core::ptr::write_volatile(self.pddr, 1);
+            core::ptr::write_volatile(&mut (*self.gpio).pddr[self.pin], 1);
         }
     }
 
     pub fn high(&mut self) {
         unsafe {
-            core::ptr::write_volatile(self.psor, 1);
+            core::ptr::write_volatile(&mut (*self.gpio).psor[self.pin], 1);
         }
     }
 }
