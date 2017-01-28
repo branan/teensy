@@ -4,6 +4,9 @@
 #![no_std]
 #![no_main]
 
+extern crate volatile;
+extern crate bit_field;
+
 mod port;
 mod sim;
 mod watchdog;

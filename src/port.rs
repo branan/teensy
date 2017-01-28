@@ -1,4 +1,5 @@
-use core;
+use volatile::Volatile;
+use bit_field::BitField;
 
 pub enum PortName {
     C
@@ -6,15 +7,15 @@ pub enum PortName {
 
 #[repr(C,packed)]
 pub struct Port {
-    pcr: [u32; 32],
-    gplcr: u32,
-    gpchr: u32,
+    pcr: [Volatile<u32>; 32],
+    gplcr: Volatile<u32>,
+    gpchr: Volatile<u32>,
     reserved_0: [u8; 24],
-    isfr: u32,
+    isfr: Volatile<u32>,
     reserved_1: [u8; 28],
-    dfer: u32,
-    dfcr: u32,
-    dfwr: u32
+    dfer: Volatile<u32>,
+    dfcr: Volatile<u32>,
+    dfwr: Volatile<u32>
 }
 
 pub struct Pin {
@@ -24,12 +25,12 @@ pub struct Pin {
 
 #[repr(C,packed)]
 struct GpioBitband {
-    pdor: [u32; 32],
-    psor: [u32; 32],
-    pcor: [u32; 32],
-    ptor: [u32; 32],
-    pdir: [u32; 32],
-    pddr: [u32; 32]
+    pdor: [Volatile<u32>; 32],
+    psor: [Volatile<u32>; 32],
+    pcor: [Volatile<u32>; 32],
+    ptor: [Volatile<u32>; 32],
+    pdir: [Volatile<u32>; 32],
+    pddr: [Volatile<u32>; 32]
 }
 
 pub struct Gpio {
@@ -48,13 +49,10 @@ impl Port {
         Pin { port: self, pin: p }
     }
 
-    pub unsafe fn set_pin_mode(&mut self, p: usize, mut mode: u32) {
-        let mut pcr = core::ptr::read_volatile(&self.pcr[p]);
-        pcr &= 0xFFFFF8FF;
-        mode &= 0x00000007;
-        mode <<= 8;
-        pcr |= mode;
-        core::ptr::write_volatile(&mut self.pcr[p], pcr);
+    pub unsafe fn set_pin_mode(&mut self, p: usize, mode: u32) {
+        self.pcr[p].update(|pcr| {
+            pcr.set_bits(8..11, mode);
+        });
     }
 
     pub fn name(&self) -> PortName {
@@ -87,13 +85,13 @@ impl Gpio {
 
     pub fn output(&mut self) {
         unsafe {
-            core::ptr::write_volatile(&mut (*self.gpio).pddr[self.pin], 1);
+            (&mut (*self.gpio)).pddr[self.pin].write(1);
         }
     }
 
     pub fn high(&mut self) {
         unsafe {
-            core::ptr::write_volatile(&mut (*self.gpio).psor[self.pin], 1);
+            (&mut (*self.gpio)).psor[self.pin].write(1);
         }
     }
 }
