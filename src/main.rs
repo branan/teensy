@@ -11,7 +11,10 @@ mod mcg;
 mod osc;
 mod port;
 mod sim;
+mod uart;
 mod watchdog;
+
+use core::fmt::Write;
 
 #[allow(empty_loop)]
 extern fn main() {
@@ -28,6 +31,8 @@ extern fn main() {
     osc.enable(10);
     // Turn on the Port C clock gate
     sim.enable_clock(sim::Clock::PortC);
+    sim.enable_clock(sim::Clock::PortB);
+    sim.enable_clock(sim::Clock::Uart0);
     // Set our clocks:
     // core: 72Mhz
     // peripheral: 36MHz
@@ -48,6 +53,14 @@ extern fn main() {
     } else {
         panic!("Somehow the clock wasn't in FEI mode");
     }
+
+    let mut uart = unsafe {
+        let rx = port::Port::new(port::PortName::B).pin(16).make_rx();
+        let tx = port::Port::new(port::PortName::B).pin(17).make_tx();
+        uart::Uart::new(0, Some(rx), Some(tx), (468, 24))
+    };
+
+    uart.write_str("Hello, World!\n");
 
     let mut gpio = pin.make_gpio();
 

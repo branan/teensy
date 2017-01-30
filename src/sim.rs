@@ -2,7 +2,9 @@ use volatile::Volatile;
 use bit_field::BitField;
 
 pub enum Clock {
+    PortB,
     PortC,
+    Uart0
 }
 
 #[repr(C,packed)]
@@ -43,6 +45,16 @@ impl Sim {
             Clock::PortC => {
                 self.scgc5.update(|scgc| {
                     scgc.set_bit(11, true);
+                });
+            }
+            Clock::PortB => {
+                self.scgc5.update(|scgc| {
+                    scgc.set_bit(10, true);
+                });
+            }
+            Clock::Uart0 => {
+                self.scgc4.update(|scgc| {
+                    scgc.set_bit(10, true);
                 });
             }
         }
