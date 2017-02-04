@@ -831,6 +831,11 @@ This sets the UART clock divider as 468.75 (24/32). The baud rate will
 be 72MHz/(16*468.75), or 9600. This is a pretty standard rate, and
 will be easy to use with any serial adapter.
 
+Finally, we send a message across the serial port. How you recieve
+this message will depend on the specific adapter you're using. If
+you're using an Arduino, open the serial console in the IDE and watch
+for the message to appear when you reset the Teensy.
+
 ## Next Time
 
 Now that we have good output capabilities, we will use them to make
