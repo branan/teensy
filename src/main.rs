@@ -60,7 +60,7 @@ extern fn main() {
         uart::Uart::new(0, Some(rx), Some(tx), (468, 24))
     };
 
-    uart.write_str("Hello, World!\n");
+    writeln!(uart, "Hello, World").unwrap();
 
     let mut gpio = pin.make_gpio();
 

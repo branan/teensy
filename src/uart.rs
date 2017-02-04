@@ -32,24 +32,22 @@ impl Uart {
                 panic!("Invalid RX pin for UART {}", id);
             }
         }
-
         if let Some(t) = tx.as_ref() {
             if t.uart() != id {
                 panic!("Invalid TX pin for UART {}", id);
             }
         }
-
-        let uart = match id {
-            0 => &mut *(0x4006A000 as *mut Uart),
-            _ => panic!("Invalid UART id: {}", id)
-        };
-
         if clkdiv.0 >= 8192 {
             panic!("Invalid UART clock divider: {}", clkdiv.0);
         }
         if clkdiv.1 >= 32 {
             panic!("Invalid UART fractional divisor: {}", clkdiv.1);
         }
+
+        let uart = match id {
+            0 => &mut *(0x4006A000 as *mut Uart),
+            _ => panic!("Invalid UART id: {}", id)
+        };
 
         uart.c4.update(|c4| {
             c4.set_bits(0..5, clkdiv.1);

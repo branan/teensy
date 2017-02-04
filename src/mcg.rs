@@ -75,10 +75,13 @@ enum OscSource {
 
 impl Fei {
     pub fn enable_xtal(&mut self, range: OscRange) {
-        let mut c2: u8 = 0;
-        c2.set_bits(4..6, range as u8);
-        c2.set_bit(2, true);
-        self.mcg.c2.write(c2);
+        self.mcg.c2.update(|c2| {
+            c2.set_bits(4..6, range as u8);
+            c2.set_bit(2, true);
+        });
+
+        // Wait for the crystal oscillator to become enabled.
+        while !self.mcg.s.read().get_bit(1) {}
     }
 
     pub fn use_external(self, divide: u32) -> Fbe {
@@ -109,17 +112,16 @@ impl Fei {
             }
         };
 
-        let mut c1: u8 = 0;
-        c1.set_bits(3..6, frdiv);
-        c1.set_bits(6..8, OscSource::External as u8);
-        self.mcg.c1.write(c1);
+        self.mcg.c1.update(|c1| {
+            c1.set_bits(6..8, OscSource::External as u8);
+            c1.set_bits(3..6, frdiv);
+            c1.set_bit(2, false);
+        });
 
         // Once we write to the control register, we need to wait for
         // the new clock to stabilize before we move on.
-        // First: Wait for the crystal oscilator to become enabled
-        // Next: Wait for the FLL to be pointed at the crystal
-        // Last: Wait for our clock source to be the crystal osc
-        while !self.mcg.s.read().get_bit(1) {}
+        // First: Wait for the FLL to be pointed at the crystal
+        // Then: Wait for our clock source to be the crystal osc
         while self.mcg.s.read().get_bit(4) {}
         while self.mcg.s.read().get_bits(2..4) != OscSource::External as u8 {}
 

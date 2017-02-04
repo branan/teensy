@@ -109,7 +109,7 @@ impl Pin {
 impl Gpio {
     pub unsafe fn new(port: PortName, pin: usize) -> Gpio {
         let gpio = match port {
-            PortName::B => 0x43FE0D00 as *mut GpioBitband,
+            PortName::B => 0x43FE0800 as *mut GpioBitband,
             PortName::C => 0x43FE1000 as *mut GpioBitband
         };
 
