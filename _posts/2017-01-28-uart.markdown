@@ -1,0 +1,839 @@
+---
+layout: post
+title: "Part 2: Sending a Message"
+date: 2017-01-28 14:00:00 -800
+Categories: teensy
+---
+
+## Overview
+
+In this post, we're going to set up the Teensy for serial
+communication with the outside world. We'll be able to use this serial
+connection to send debug information back to our computers.
+
+Serial communication is very timing-sensitive. Because of this, we
+can't use a serial connection until we have a very stable clock source
+configured.
+
+### A serial interface
+
+To connect the serial pins of the Teensy to our computer, we will need
+some sort of USB serial interface. I'll be using an Arduino Leonardo
+for this. Any arduino-compatible device with at least one hardware
+serial port will work, including a second Teensy. You may also be able
+to find an FTDI breakout board or cable - but they're pricey enough
+that a second development board is probably a better investment. Trust
+me, you can never have too many development boards!
+
+The Teensy 3.2 and 3.5 are 5V tolerant, meaning they can be safely
+used with just about any USB to serial converter (including the
+Arduino Leonardo that I'm using). The 3.1 and 3.6 require an adapter
+running at 3.3V. For them, you'll likely want to either use another
+Teensy, or a dedicated 3.3v serial adapter. Be careful about USB to
+RS232 adapters. They run at much higher volatages than the
+microcontroller, and *will* fry your teensy if you try to use one. You
+want an adapter that has pin headers, not one with a DE-9 plug.
+
+If you're using an Arduino or Teensy as your adapter, check out the
+[serial_forward][serial_forward] Arduino sketch in the code
+repository. Running this sketch will cause any output from our Teensy
+to be forwarded through our Arduino to the IDE's console.
+
+[serial_forward]: https://github.com/branan/teensy/tree/master/serial_forward
+
+## Cleaner Register Handling
+
+In the first post, we hand-coded all of our volatile register accesses
+and bit manipulations. This is useful for understanding how the MCU
+works, but has a few problems:
+
+* Complex bit manipulations become "write-only" - it is hard to read
+  the code and understand what's happening
+
+* We skipped some types of bounds checking, because it would have made
+  the code even harder to read. It would be nice to have this.
+
+* Volatile accesses introduce lots of extra "unsafe" blocks, making it
+  hard for us to see when we have code (like the Port and Gpio) that
+  actually does weird things with memory.
+
+To solve these, we will use a pair of crates from Philipp Oppermann:
+`volatile` and `bit_field`. The `volatile` crate provides safe
+wrappers for accessing volatile integers, like our hardware
+registers. This is paired with `bit_field` to streamline our
+manipulation of those registers.
+
+### Rewriting the Watchdog
+
+The Watchdog provides a good demonstration for how these crates are
+used. The updated code is shown below:
+
+{% highlight rust %}
+use volatile::Volatile;
+use bit_field::BitField;
+
+#[repr(C,packed)]
+pub struct Watchdog {
+    stctrlh: Volatile<u16>,
+    stctrll: Volatile<u16>,
+    tovalh: Volatile<u16>,
+    tovall: Volatile<u16>,
+    winh: Volatile<u16>,
+    winl: Volatile<u16>,
+    refresh: Volatile<u16>,
+    unlock: Volatile<u16>,
+    tmrouth: Volatile<u16>,
+    tmroutl: Volatile<u16>,
+    rstcnt: Volatile<u16>,
+    presc: Volatile<u16>
+}
+
+impl Watchdog {
+    pub unsafe fn new() -> &'static mut Watchdog {
+        &mut *(0x40052000 as *mut Watchdog)
+    }
+
+    pub fn disable(&mut self) {
+        self.unlock.write(0xC520);
+        self.unlock.write(0xD928);
+        unsafe {
+            asm!("nop" : : : "memory");
+            asm!("nop" : : : "memory");
+        }
+        self.stctrlh.update(|ctrl| {
+            ctrl.set_bit(0, false);
+        });
+    }
+}
+{% endhighlight %}
+
+All of the struct fields are now `Volatile`. This type is always the
+same size as the integer it wraps, so it can be dropped in like this
+without requiring any changes to our struct layout. The `new` function
+is unchanged, and is still unafe. Most of the change comes in the
+`disable` method.
+
+We no longer need the entire body of this function to be unsafe - we
+now mark only the inline assembly as such. The unlock writes at the
+start of the method are much easier to read than they were with the
+`core::ptr::write_volatile` method. Our read-modify-write of the
+`ctrlh` register is also clearly marked by the `update` method, and
+the `set_bit` function makes it clear what we're doing to the register
+bits.
+
+### Other Structs
+
+The changes to the SIM are very similar to those for the watchdog -
+switching to `update` and `set_bit`, instead of raw volatile
+operations and bit manipulations. The Port and Gpio structs have some
+special considerations:
+
+* Since `Port::set_pin_mode` can affect other objects (Pin or Gpio
+  instances) it needs to stay unsafe, even though it now only uses
+  safe functions.
+
+* The GPIO methods all still need unsafe blocks to deal with the raw
+  pointer to the GPIO struct.
+
+Both of these are fine, though - we're actually doing weird things
+with memory in the Port and Gpio structs, so they *should* be flagged
+as unsafe. Now that we aren't forced to use unsafe for all register
+accesses, it becomes more obvious that this code requires special
+care.
+
+All of these changes can be seen [on github][commit].
+
+[commit]: https://github.com/branan/teensy/commit/59442ed871c59a0de80af3ab828f01aa9531dd3a
+
+### Updating the linker script
+
+Bringing in these crates also requires a small change to our linker
+script. The bit_field crate contains a bunch of strings, since it can
+panic on certain overflow errors. We need to be sure that those
+strings end up in the Teensy's flash.
+
+If we do nothing it will actually work - for now. The linker will put
+all unknown sections right after our last defined section. In this
+case, that means "right after the code", so they will end up at a
+reasonable place in the flash. It is better to be explicit with this,
+so that we do not accidentally break it later. We will add a new
+section to our `layout.ld` to handle these strings:
+
+```
+    .rodata : {
+        *(.rodata*)
+    } > FLASH
+```
+
+## A more stable clock
+
+When the MK20DX256 boots, it runs off of an internal reference
+clock. This is more than fast enough for our needs - The processor
+runs somewhere between 20MHz and 25MHz - but it is not accurate
+enough. In order to connect to another device over a serial interface,
+we need a clock error below about 3%.
+
+Fortunately, the Teensy is equipped with an accurate 16MHz crystal
+oscillator.  We will use this crystal as a reference to establish a
+very stable 72MHz frequency for the MCU.
+
+If you're using a Teensy 3.6, you're on your own here - the clock
+generator in the MK66FX1M0 chip has very different parameters than the
+one in the earlier chips. If you're well-versed in reading data
+sheets, you should be able to sort out the differences. Feel free to
+email me if you need help here.
+
+If you're using a Teensy 3.0, the maximum rated clock speed is
+slower. You'll need to update some of the parameters used to stay
+within the manufacturer's rated speeds, but the overall register
+layout is the same.
+
+### Clock Modes
+
+There are a number of modes that the MK20DX256's clock system can be
+in. They control which basic oscillator (the very accurate external
+crystal or a less-accurate internal reference) is used, and how that
+reference is multiplied to produce the final clock speed.
+
+The procesor starts in FEI mode - "FLL enabled, internal
+(reference)". This means that the clock is generated by the "Frequency
+Locked Loop", based on the internal 32KHz reference. Our goal is to
+transition the clock generator to "PEE" mode, which means the clock is
+generated by the "Phase Locked Loop", based on the external 16MHz
+crystal reference. The difference between frequency- and
+phase-locked-loops is outside the scope of this post, but in general a
+PLL creates a more stable output frequency.
+
+From FEI mode, we will transition the processor through FBE and PBE
+modes, before arriving in PEE mode. We will rely on Rust's type system
+to ensure that our transitions between these modes are safe and
+correct.
+
+### The Clock Registers.
+
+Before we dive into the clock's state machine, we'll look at the basic
+clock registers. Like all the other functional units of the MK20DX256,
+the MCG (Master Clock Generator) is represented by a block of
+registers at a known address:
+
+{% highlight rust %}
+use volatile::Volatile;
+use bit_field::BitField;
+
+#[repr(C,packed)]
+pub struct Mcg {
+    c1: Volatile<u8>,
+    c2: Volatile<u8>,
+    c3: Volatile<u8>,
+    c4: Volatile<u8>,
+    c5: Volatile<u8>,
+    c6: Volatile<u8>,
+    s: Volatile<u8>,
+    _pad0: u8,
+    sc: Volatile<u8>,
+    _pad1: u8,
+    atcvh: Volatile<u8>,
+    atcvl: Volatile<u8>,
+    c7: Volatile<u8>,
+    c8: Volatile<u8>,
+}
+
+impl Mcg {
+    pub unsafe fn new() -> &'static mut Mcg {
+        &mut *(0x40064000 as *mut Mcg)
+    }
+}
+{% endhighlight %}
+
+This is the familiar pattern of defining the memory layout as a packed
+struct, with our `new` method being an unsafe way to create that
+struct at the appropriate hardware address for these registers.
+
+### The Clock State Machine
+
+Each of the clock mode transitions represents small modifications to
+the MCG - typically just a few bits changed in a
+register. Unfortunately, the set of valid modifications changes with
+the mode. Invalid modifications can cause the processor itself to fail
+in unexpected ways (all CPUs rely on a stable clock, after all). We
+*could* just rely on ourselves to only program the MCG properly, but
+we would be better served by building tools to ensure we do it safely
+and correctly.
+
+We'll start by defining each of our possible states as a struct
+holding a mutable reference to the MCG. Each of these structs will
+have methods impl'd on them that allow only the changes to the MCG
+which are safe in that state. There is no struct for PEE mode, since
+we have no need to modify the MCG at that point. A more complete
+impmlementation would include PEE mode, as well as the other states
+that we aren't using.
+
+{% highlight rust %}
+pub struct Fei {
+    mcg: &'static mut Mcg
+}
+
+pub struct Fbe {
+    mcg: &'static mut Mcg
+}
+
+pub struct Pbe {
+    mcg: &'static mut Mcg
+}
+{% endhighlight %}
+
+Now, for each struct, we will need to define the functions that
+transition the clock to the next state. We will start with the FEI to
+FBE transition. For this, we need to enable the crystal oscillator,
+and then switch our output to it. This second operation will also
+consume the Fei instance, returning an Fbe instance. This represents
+the transition of the MCG from using the FLL based on the internal
+reference (FEI mode), to being clocked directly from the external
+crystal (FBE mode).
+
+Even though we're transitioning away from using the FLL, we want to be
+sure that we continue to operate it within its normal parameters. This
+is why we must pass in a clock divider for it - our 16MHz crystal is
+far too fast to be used as a reference for the FLL without this
+divider. Making sure that we do things right will also make it easier
+to expand this code to support FEE and other modes in the future.
+
+In both functions, we must wait for our changes to take effect before
+we continue. We read the status register in a loop until the MCG
+reports that it is in the expected state.
+
+{% highlight rust %}
+pub enum OscRange {
+    Low = 0,
+    High = 1,
+    VeryHigh = 2
+}
+
+enum OscSource {
+    LockedLoop = 0,
+    Internal = 1,
+    External = 2
+}
+
+impl Fei {
+    pub fn enable_xtal(&mut self, range: OscRange) {
+        self.mcg.c2.update(|c2| {
+            c2.set_bits(4..6, range as u8);
+            c2.set_bit(2, true);
+        });
+
+        // Wait for the crystal oscillator to become enabled.
+        while !self.mcg.s.read().get_bit(1) {}
+    }
+
+    pub fn use_external(self, divide: u32) -> Fbe {
+        let osc = self.mcg.c2.read().get_bits(4..6);
+        let frdiv = if osc == OscRange::Low as u8 {
+            match divide {
+                1 => 0,
+                2 => 1,
+                4 => 2,
+                8 => 3,
+                16 => 4,
+                32 => 5,
+                64 => 6,
+                128 => 7,
+                _ => panic!("Invalid external clock divider: {}", divide)
+            }
+        } else {
+            match divide {
+                32 => 0,
+                64 => 1,
+                128 => 2,
+                256 => 3,
+                512 => 4,
+                1024 => 5,
+                1280 => 6,
+                1536 => 7,
+                _ => panic!("Invalid external clock divider: {}", divide)
+            }
+        };
+
+        self.mcg.c1.update(|c1| {
+            c1.set_bits(6..8, OscSource::External as u8);
+            c1.set_bits(3..6, frdiv);
+            c1.set_bit(2, false);
+        });
+
+        // Once we write to the control register, we need to wait for
+        // the new clock to stabilize before we move on.
+        // First: Wait for the FLL to be pointed at the crystal
+        // Then: Wait for our clock source to be the crystal osc
+        while self.mcg.s.read().get_bit(4) {}
+        while self.mcg.s.read().get_bits(2..4) != OscSource::External as u8 {}
+
+        Fbe { mcg: self.mcg }
+    }
+}
+{% endhighlight %}
+
+From FBE mode, we transition to PBE mode by enabling the PLL. This
+will be done as a single function, which takes the PLL divider
+parameters. Our output frequency will be the crystal frequency
+(16MHz) multiplied by the fraction numerator/denominator.
+
+{% highlight rust %}
+impl Fbe {
+    pub fn enable_pll(self, numerator: u8, denominator: u8) -> Pbe {
+        if numerator < 24 || numerator > 55 {
+            panic!("Invalid PLL VCO divide factor: {}", numerator);
+        }
+
+        if denominator < 1 || denominator > 25 {
+            panic!("Invalid PLL reference divide factor: {}", denominator);
+        }
+
+        self.mcg.c5.update(|c5| {
+            c5.set_bits(0..5, denominator - 1);
+        });
+
+        self.mcg.c6.update(|c6| {
+            c6.set_bits(0..5, numerator - 24);
+            c6.set_bit(6, true);
+        });
+
+        // Wait for PLL to be enabled
+        while !self.mcg.s.read().get_bit(5) {}
+        // Wait for the PLL to be "locked" and stable
+        while !self.mcg.s.read().get_bit(6) {}
+
+        Pbe { mcg: self.mcg }
+    }
+}
+{% endhighlight %}
+
+This gets us to PBE mode, or "PLL Bypassed, based on the External
+oscillator". The PLL will be running at our desired frequency here,
+but not selected as the main clock source. The last step is to engage
+the PLL, making it our actual clock source. There's a little bit of
+weirdness in our wait loop here, due to how the MCG reports which of
+the FLL or PLL is in use.
+
+This function consumes the Pbe instance, but does not return
+anything. This is because we are "done" with clock setup here. If you
+wanted to potentially transition out of PEE mode, you would return
+some sort of value here to allow continued modification of the clock
+state.
+
+{% highlight rust %}
+impl Pbe {
+    pub fn use_pll(self) {
+        self.mcg.c1.update(|c1| {
+            c1.set_bits(6..8, OscSource::LockedLoop as u8);
+        });
+
+        // mcg.c1 and mcg.s have slightly different behaviors.  In c1,
+        // we use one value to indicate "Use whichever LL is
+        // enabled". In s, it is differentiated between the FLL at 0,
+        // and the PLL at 3. Instead of adding a value to OscSource
+        // which would be invalid to set, we just check for the known
+        // value "3" here.
+        while self.mcg.s.read().get_bits(2..4) != 3 {}
+    }
+}
+{% endhighlight %}
+
+That's it for the clock mode transitions! When we update main, we'll
+work through each of these clock modes, starting from FEI, to move the
+MCG to the state we want it in. At each step, we know that we can only
+make the modifications that are safe.
+
+The last part of clock setup is getting our initial Fei instance from
+the MCG. The MCG, however, doesn't know that it's in FEI mode. We need
+to query the various control registers to determine which state it is
+actually in, and return the appropriate struct. For the purposes of
+this blog post, we'll panic if the clock is in an unknown state. In
+production code, you'd want to implement the full set of clock states
+so that this function would always return a valid value.
+
+{% highlight rust %}
+pub enum Clock {
+    Fei(Fei),
+    Fbe(Fbe),
+    Pbe(Pbe)
+}
+
+impl mcg {
+    pub fn clock(&'static mut self) -> Clock {
+        let source: OscSource = unsafe {
+            mem::transmute(self.c1.read().get_bits(6..8))
+        };
+        let fll_internal = self.c1.read().get_bit(2);
+        let pll_enabled = self.c6.read().get_bit(6);
+
+        match (fll_internal, pll_enabled, source) {
+            (true, false, OscSource::LockedLoop) => Clock::Fei(Fei{ mcg: self }),
+            (false, false, OscSource::External) => Clock::Fbe(Fbe{ mcg: self }),
+            (_, true, OscSource::External) => Clock::Pbe(Pbe{ mcg: self }),
+            _ => panic!("The current clock mode cannot be represented as a known struct")
+        }
+    }
+}
+{% endhighlight %}
+
+There is a bit of unsafety here, to coerce the oscillator selection
+field to our enum type. We otherwise are simply comparing the set of
+control registers to the expected values for each known mode.
+
+### The Oscillator Unit
+
+I wasn't entirely truthful when I said we were "enableing the crystal"
+earlier. What we actually did was select the crystal as the clock
+source for the PLL. The crystal oscillator itself needs to be enabled
+and configured through its own set of registers. We'll put the code
+for this in a file called `osc.rs`.
+
+{% highlight rust %}
+use volatile::Volatile;
+use bit_field::BitField;
+
+pub struct Osc {
+    cr: Volatile<u8>
+}
+
+impl Osc {
+    pub unsafe fn new() -> &'static mut Osc {
+        &mut *(0x40065000 as *mut Osc)
+    }
+
+    pub fn enable(&mut self, capacitance: u8) {
+        if capacitance % 2 == 1 || capacitance > 30 {
+            panic!("Invalid crystal capacitance value: {}", capacitance)
+        }
+
+        let mut cr: u8 = 0;
+
+        // The capacitance control bits are backwards, and start at 2pf
+        // We swizzle them all here
+        cr.set_bit(3, capacitance.get_bit(1));
+        cr.set_bit(2, capacitance.get_bit(2));
+        cr.set_bit(1, capacitance.get_bit(3));
+        cr.set_bit(0, capacitance.get_bit(4));
+
+        // enable the crystal oscillator
+        cr.set_bit(7, true);
+
+        self.cr.write(cr);
+    }
+}
+{% endhighlight %}
+
+The oscillator is very simple compared to some of the functional units
+we've had to deal with. Most of the body of this function is setting
+the capacitive load for the crystal (between 2pf and 30pf). It also
+sets the enable bit, to turn on the oscillator.
+
+### Putting it Together & Updating main
+
+We've created two new files for managing two new functional units of
+the MCU: the MCG and the OSC. The OSC has a single function to enable
+the unit, and set the capacitance needed for the external crystal. The
+MCG has a series of structs that define a state machine for bringing
+the clock machinery to the correct mode. We'll update main to take
+advantage of these. At the end we still just turn on the LED, but in
+between we now set up the clock machinery to run the MCU at its rated
+72MHz.
+
+{% highlight rust %}
+extern fn main() {
+    let (wdog,sim,mcg,osc,pin) = unsafe {
+        (watchdog::Watchdog::new(),
+         sim::Sim::new(),
+         mcg::Mcg::new(),
+         osc::Osc::new(),
+         port::Port::new(port::PortName::C).pin(5))
+    };
+
+    wdog.disable();
+    // Enable the crystal oscillator with 10pf of capacitance
+    osc.enable(10);
+    // Turn on the Port C clock gate
+    sim.enable_clock(sim::Clock::PortC);
+    // Set our clocks:
+    // core: 72Mhz
+    // peripheral: 36MHz
+    // flash: 24MHz
+    sim.set_dividers(1, 2, 3);
+    // We would also set the USB divider here if we wanted to use it.
+
+    // Now we can start setting up the MCG for our needs.
+    if let mcg::Clock::Fei(mut fei) = mcg.clock() {
+        // Our 16MHz xtal is "very fast", and needs to be divided
+        // by 512 to be in the acceptable FLL range.
+        fei.enable_xtal(mcg::OscRange::VeryHigh);
+        let fbe = fei.use_external(512);
+
+        // PLL is 27/6 * xtal == 72MHz
+        let pbe = fbe.enable_pll(27, 6);
+        pbe.use_pll();
+    } else {
+        panic!("Somehow the clock wasn't in FEI mode");
+    }
+
+    let mut gpio = pin.make_gpio();
+
+    gpio.output();
+    gpio.high();
+
+    loop {}
+}
+{% endhighlight %}
+
+This looks a lot more complicated, but is really only a few
+changes. From the top:
+
+* We add the OSC and MCG to the list functional units we want
+  references for.
+* After the watchdog is disabled, we enable the external oscillator,
+  with 10pf of capacitiance. This is the right amount for the cyrstal
+  on the Teensy. You might need a different number, if you have a
+  different board.
+* We set the "clock dividers" of the SIM. More on this below.
+* If the clock is in FEI mode, we transition it to PEE mode using the
+  set of functions we defined above. If it's not in FEI mode we panic,
+  since it should always been in FEI mode at boot.
+
+The only thing we haven't already covered is the new `set_dividers`
+method of the SIM. We want to run the main CPU core at 72MHz, but not
+all the parts of the chip can run that fast. We need to keep the
+peripheral bus below 50MHz, and the Flash below 25MHz. This function
+sets up the "clock dividers", so that we can keep the bus and flash
+running at the slower speeds that they are rated for.
+
+{% highlight rust %}
+impl Sim
+    pub fn set_dividers(&mut self, core: u32, bus: u32, flash: u32) {
+        let mut clkdiv: u32 = 0;
+        clkdiv.set_bits(28..32, core-1);
+        clkdiv.set_bits(24..28, bus-1);
+        clkdiv.set_bits(16..20, flash-1);
+        self.clkdiv1.write(clkdiv);
+    }
+}
+{% endhighlight %}
+
+## The Serial Port
+
+Now that we have a stable clock, we can move on to configuring the
+serial port, or *UART* (Universal Asynchronous
+Reciever/Transmitter). For our needs the UART itself is fairly easy to
+program. Most of the challenge here will be in expanding our pin
+handling to support serial functionality.
+
+### More About Pins
+
+When we first set up a GPIO pin, we had a couple of advantages:
+
+1. All pins can act as GPIOs, so we didn't need any validation logic.
+2. All pins use the same mux value when configured as a GPIO.
+
+For the UART, neither of these shortcuts holds. Our setup code will
+need to know both which pins can be used for serial communication, and
+which mux value will appropriately connect those pins to the UART.
+
+Just as for the GPIO, we will add functions to the Pin struct to
+convert a pin to a serial-specific struct.
+
+{% highlight rust %}
+pub struct Tx(u8);
+pub struct Rx(u8);
+
+impl Pin {
+    pub fn make_rx(self) -> Rx {
+        unsafe {
+            let port = &mut *self.port;
+            match (port.name(), self.pin) {
+                (PortName::B, 16) => {
+                    port.set_pin_mode(self.pin, 3);
+                    Rx(0)
+                },
+                _ => panic!("Invalid serial RX pin")
+            }
+        }
+    }
+
+    pub fn make_tx(self) -> Tx {
+        unsafe {
+            let port = &mut *self.port;
+            match (port.name(), self.pin) {
+                (PortName::B, 17) => {
+                    port.set_pin_mode(self.pin, 3);
+                    Tx(0)
+                },
+                _ => panic!("Invalid serial TX pin")
+            }
+        }
+    }
+}
+{% endhighlight %}
+
+Each Tx or Rx instance includes which UART it is valid for. We could
+choose to encode this in the type system, but that sends us down a
+road of a lot of complexity (possibly including separate Structs for
+each UART). We still potentially panic when converting an invalid pin
+to an Rx or Tx instance, so the tradeoff of avoiding another panic
+when passing that pin to the wrong UART doesn't seem worth it. Your
+needs might be different.
+
+This code also reference a new `PortName::B`. This is easy to add to
+the existing Port and GPIO code. The Port lives at 0x4004A000, and the
+GpioBitband is at 0x43FE0800.
+
+We now have the code in place to set up pins B16 and B17 as UART
+pins. These map to pins 0 and 1 on the Teensy, the same as `Serial1`
+when programming the Teensy with the Arduino IDE.
+
+### The UART
+
+The UART is our first struct that will require a complex `::new`
+implementation. In addition to selecting which UART unit we will use,
+the method must handle several other parameters:
+
+* An optional Rx pin, to enable recieve functionality
+* An optional Tx pin, to enable transmit functinality
+* The clock divider, as an A,B pair. This is interpreted as `A +
+  B/32`.
+
+On the Teensy 3.5 or 3.6, you could choose to use a float for the
+third parameter. This would require you to then convert it to the
+integers used by the hardware module itself. It's up to you if this
+extra work is worth the simpler interface.
+
+{% highlight rust %}
+use volatile::Volatile;
+use bit_field::BitField;
+
+use core;
+
+use super::port::{Rx,Tx};
+
+#[repr(C,packed)]
+pub struct Uart {
+    bdh: Volatile<u8>,
+    bdl: Volatile<u8>,
+    c1: Volatile<u8>,
+    c2: Volatile<u8>,
+    s1: Volatile<u8>,
+    s2: Volatile<u8>,
+    c3: Volatile<u8>,
+    d: Volatile<u8>,
+    ma1: Volatile<u8>,
+    ma2: Volatile<u8>,
+    c4: Volatile<u8>,
+    c5: Volatile<u8>,
+    ed: Volatile<u8>,
+    modem: Volatile<u8>,
+    ir: Volatile<u8>,
+}
+
+
+impl Uart {
+    pub unsafe fn new(id: u8, rx: Option<Rx>, tx: Option<Tx>, clkdiv: (u16,u8)) -> &'static mut Uart {
+        if let Some(r) = rx.as_ref() {
+            if r.uart() != id {
+                panic!("Invalid RX pin for UART {}", id);
+            }
+        }
+        if let Some(t) = tx.as_ref() {
+            if t.uart() != id {
+                panic!("Invalid TX pin for UART {}", id);
+            }
+        }
+        if clkdiv.0 >= 8192 {
+            panic!("Invalid UART clock divider: {}", clkdiv.0);
+        }
+        if clkdiv.1 >= 32 {
+            panic!("Invalid UART fractional divisor: {}", clkdiv.1);
+        }
+
+        let uart = match id {
+            0 => &mut *(0x4006A000 as *mut Uart),
+            _ => panic!("Invalid UART id: {}", id)
+        };
+
+        uart.c4.update(|c4| {
+            c4.set_bits(0..5, clkdiv.1);
+        });
+        uart.bdh.update(|bdh| {
+            bdh.set_bits(0..5, clkdiv.0.get_bits(8..13) as u8);
+        });
+        uart.bdl.write(clkdiv.0.get_bits(0..8) as u8);
+
+        uart.c2.update(|c2| {
+            c2.set_bit(2, rx.is_some());
+            c2.set_bit(3, tx.is_some());
+        });
+
+        uart
+    }
+}
+{% endhighlight %}
+
+This starts with validating the parameters: The Rx and Tx pins must be
+usable for this UART, and the clock dividers need to be in the
+acceptable range. The clock dividers are passed to the
+hardware. Lastly, recieve and transmit are enabled if appropriate pins
+were passed in, and the Uart reference is returned.
+
+### String Output
+
+To use the UART as an output device, we will implement the
+`core::fmt::Write` trait for it. This will enable the `write!` macro,
+and make it easy to use a UART for output from our panic handler.
+
+Most of the functions in the `Write` trait have default
+implementations, which we will rely on. The only one we must implement
+is `write_str`. Our implementation writes each byte of the string in
+sequeuence, waiting in between for the hardware to indicate that it is
+ready for another byte.
+
+{% highlight rust %}
+impl core::fmt::Write for Uart {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        for b in s.bytes() {
+            while !self.s1.read().get_bit(7) {}
+            self.d.write(b);
+        }
+        Ok(())
+    }
+}
+{% endhighlight %}
+
+## Hello, World!
+
+Adding serial output to our main is now just a few lines of
+code. First, enable the Port B and UART clocks:
+
+{% highlight rust %}
+sim.enable_clock(sim::Clock::PortB);
+sim.enable_clock(sim::Clock::Uart0);
+{% endhighlight %}
+
+With those clocks enabled, we can grab a uart instance, and write a
+message:
+
+{% highlight rust %}
+let mut uart = unsafe {
+    let rx = port::Port::new(port::PortName::B).pin(16).make_rx();
+    let tx = port::Port::new(port::PortName::B).pin(17).make_tx();
+    uart::Uart::new(0, Some(rx), Some(tx), (468, 24))
+};
+
+writeln!(uart, "Hello, World").unwrap();
+{% endhighlight %}
+
+This sets the UART clock divider as 468.75 (24/32). The baud rate will
+be 72MHz/(16*468.75), or 9600. This is a pretty standard rate, and
+will be easy to use with any serial adapter.
+
+## Next Time
+
+Now that we have good output capabilities, we will use them to make
+our panic handler useful. With good panics, we can then focus on
+cleaning up our hardware setup to be safer and more robust. Our goal
+will be to minimize the amount of unsafe code in `main`.
