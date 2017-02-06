@@ -89,6 +89,12 @@ system. For Arch, it looks like this:
 $ sudo pacman -S arm-none-eabi-gcc
 {% endhighlight %}
 
+On MacOS, you can get an appropriate GCC from Homebrew:
+
+{% highlight shell %}
+$ brew cask install gcc-arm-embedded
+{% endhighlight %}
+
 Finally, you'll want to get the [Teensy Loader][teensy-loader]. This
 is a small command line tool that handles flashing a program to the
 Teensy. If you are on Linux, it may also be available through your
@@ -318,7 +324,7 @@ Building our project is a three-step process:
 
 * Use xargo to compile the rust code for the target processor
 * Convert the built program to the right format with objcopy
-* Flash our code to the Teensy with teensy-loader-cli
+* Flash our code to the Teensy with teensy_loader_cli
 
 This sort of repetitive sequenced work is exactly what Makefiles were
 designed for. Ours isn't particularly complicated:
@@ -340,7 +346,7 @@ $(HEX): $(ELF)
 
 .PHONY: flash
 flash: $(HEX)
-	teensy-loader-cli -w -mmcu=mk20dx256 $(HEX) -v
+	teensy_loader_cli -w -mmcu=mk20dx256 $(HEX) -v
 {% endhighlight %}
 
 The targets marked *.PHONY* will always be built by make, even if it
