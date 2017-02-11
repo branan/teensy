@@ -35,3 +35,4 @@ exclude:
 
 disqus:
   shortname: teensyrust
+google_analytics: UA-91798686-1
