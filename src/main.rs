@@ -60,22 +60,20 @@ extern fn main() {
         panic!("Somehow the clock wasn't in FEI mode");
     }
 
-    let mut uart = unsafe {
+    // Initialize the UART as our panic writer
+    unsafe {
         let rx = port::Port::new(port::PortName::B).pin(16).make_rx();
         let tx = port::Port::new(port::PortName::B).pin(17).make_tx();
-        uart::Uart::new(0, Some(rx), Some(tx), (468, 24))
-    };
-
-    unsafe {
+        let uart = uart::Uart::new(0, Some(rx), Some(tx), (468, 24));
         WRITER = Some(uart);
-    }
+    };
 
     let mut gpio = pin.make_gpio();
 
     gpio.output();
     gpio.high();
 
-    panic!("Reached the end of main");
+    loop {};
 }
 
 extern {
