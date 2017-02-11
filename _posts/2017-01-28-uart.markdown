@@ -790,7 +790,9 @@ Most of the functions in the `Write` trait have default
 implementations, which we will rely on. The only one we must implement
 is `write_str`. Our implementation writes each byte of the string in
 sequeuence, waiting in between for the hardware to indicate that it is
-ready for another byte.
+ready for another byte. Once all the bytes are written, we wait for
+the Transmit Complete (TC) flag to be set, indicating that the UART is
+finished sending all the data.
 
 {% highlight rust %}
 impl core::fmt::Write for Uart {
@@ -799,6 +801,7 @@ impl core::fmt::Write for Uart {
             while !self.s1.read().get_bit(7) {}
             self.d.write(b);
         }
+        while !self.s1.read().get_bit(6) {}
         Ok(())
     }
 }
