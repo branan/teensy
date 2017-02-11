@@ -71,8 +71,8 @@ to install nightly Rust. We will also rely on a tool called
 targeting an embedded environment. Xargo can be installed using cargo.
 
 {% highlight shell %}
-$ rustup component add rust-src
 $ rustup toolchain install nightly
+$ rustup component add rust-src --toolchain=nightly
 $ cargo install xargo
 {% endhighlight %}
 
