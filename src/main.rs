@@ -3,6 +3,7 @@
 //#![deny(warnings)]
 #![no_std]
 #![no_main]
+#![no_builtins]
 
 extern crate volatile;
 extern crate bit_field;
@@ -14,7 +15,11 @@ mod sim;
 mod uart;
 mod watchdog;
 
+use core::slice;
 use core::fmt::Write;
+use volatile::Volatile;
+
+static mut WRITER: Option<&'static mut uart::Uart> = None;
 
 #[allow(empty_loop)]
 extern fn main() {
@@ -27,6 +32,7 @@ extern fn main() {
     };
 
     wdog.disable();
+    unsafe { setup_bss() };
     // Enable the crystal oscillator with 10pf of capacitance
     osc.enable(10);
     // Turn on the Port C clock gate
@@ -60,18 +66,32 @@ extern fn main() {
         uart::Uart::new(0, Some(rx), Some(tx), (468, 24))
     };
 
-    writeln!(uart, "Hello, World").unwrap();
+    unsafe {
+        WRITER = Some(uart);
+    }
 
     let mut gpio = pin.make_gpio();
 
     gpio.output();
     gpio.high();
 
-    loop {}
+    panic!("Reached the end of main");
 }
 
 extern {
     fn _stack_top();
+    static mut _bss_start: u8;
+    static mut _bss_end: u8;
+}
+
+unsafe fn setup_bss() {
+    let bss_start = &mut _bss_start as *mut u8;
+    let bss_end = &mut _bss_end as *mut u8;
+    let bss_len = bss_end as usize - bss_start as usize;
+    let bss = slice::from_raw_parts_mut(bss_start, bss_len);
+    for b in &mut bss.iter_mut() {
+        *b = 0;
+    }
 }
 
 #[link_section = ".vectors"]
@@ -91,8 +111,19 @@ pub static _FLASHCONFIG: [u8; 16] = [
 #[lang = "panic_fmt"]
 #[no_mangle]
 #[allow(empty_loop)]
-pub extern fn rust_begin_panic(_msg: core::fmt::Arguments,
-                               _file: &'static str,
-                               _line: u32) -> ! {
-    loop {};
+pub extern fn rust_begin_panic(msg: core::fmt::Arguments,
+                               file: &'static str,
+                               line: u32) -> ! {
+    if let Some(mut uart) = unsafe { WRITER.as_mut() } {
+        write!(uart, "panicked at '").unwrap();
+        uart.write_fmt(msg).unwrap();
+        write!(uart, "', {}:{}\n", file, line).unwrap();
+    }
+
+    // Reset the MCU after we've printed our panic.
+    let mut aircr = unsafe {
+        &mut *(0xE000ED0C as *mut Volatile<u32>)
+    };
+    aircr.write(0x05FA0004);
+    unreachable!();
 }
