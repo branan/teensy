@@ -72,6 +72,7 @@ impl core::fmt::Write for Uart {
             while !self.s1.read().get_bit(7) {}
             self.d.write(b);
         }
+        while !self.s1.read().get_bit(6) {}
         Ok(())
     }
 }
