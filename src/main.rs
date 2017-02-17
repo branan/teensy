@@ -23,15 +23,19 @@ static mut WRITER: Option<&'static mut uart::Uart> = None;
 
 #[allow(empty_loop)]
 extern fn main() {
-    let (wdog,sim,mcg,osc,pin) = unsafe {
-        (watchdog::Watchdog::new(),
-         sim::Sim::new(),
-         mcg::Mcg::new(),
+    let wdog = unsafe {
+        watchdog::Watchdog::new()
+    };
+    wdog.disable();
+
+    let (mcg,osc,pin) = unsafe {
+        (mcg::Mcg::new(),
          osc::Osc::new(),
          port::Port::new(port::PortName::C).pin(5))
     };
 
-    wdog.disable();
+    let mut sim = sim::Sim::new();
+
     unsafe { setup_bss() };
     // Enable the crystal oscillator with 10pf of capacitance
     osc.enable(10);
