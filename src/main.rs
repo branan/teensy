@@ -36,7 +36,7 @@ extern fn main() {
     }
 
     // Enable the crystal oscillator with 10pf of capacitance
-    Osc::new().enable(10);
+    let osc_token = Osc::new().enable(10);
 
     // Set our clocks:
     // core: 72Mhz
@@ -51,7 +51,7 @@ extern fn main() {
     if let Clock::Fei(mut fei) = mcg.clock() {
         // Our 16MHz xtal is "very fast", and needs to be divided
         // by 512 to be in the acceptable FLL range.
-        fei.enable_xtal(OscRange::VeryHigh);
+        fei.enable_xtal(OscRange::VeryHigh, osc_token);
         let fbe = fei.use_external(512);
 
         // PLL is 27/6 * xtal == 72MHz

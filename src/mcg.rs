@@ -2,6 +2,8 @@ use core::mem;
 use volatile::Volatile;
 use bit_field::BitField;
 
+use super::OscToken;
+
 use core::sync::atomic::{AtomicBool,ATOMIC_BOOL_INIT,Ordering};
 
 #[repr(C,packed)]
@@ -93,7 +95,7 @@ enum OscSource {
 }
 
 impl Fei {
-    pub fn enable_xtal(&mut self, range: OscRange) {
+    pub fn enable_xtal(&mut self, range: OscRange, _token: OscToken) {
         self.mcg.mcg.c2.update(|c2| {
             c2.set_bits(4..6, range as u8);
             c2.set_bit(2, true);

@@ -12,6 +12,10 @@ pub struct Osc {
     osc: &'static mut OscRegs
 }
 
+pub struct OscToken {
+    _private: ()
+}
+
 static OSC_INIT: AtomicBool = ATOMIC_BOOL_INIT;
 
 impl Osc {
@@ -24,7 +28,7 @@ impl Osc {
         Osc {osc: regs}
     }
 
-    pub fn enable(&mut self, capacitance: u8) {
+    pub fn enable(&mut self, capacitance: u8) -> OscToken {
         if capacitance % 2 == 1 || capacitance > 30 {
             panic!("Invalid crystal capacitance value: {}", capacitance)
         }
@@ -42,11 +46,18 @@ impl Osc {
         cr.set_bit(7, true);
 
         self.osc.cr.write(cr);
+        OscToken::new()
     }
 }
 
 impl Drop for Osc {
     fn drop(&mut self) {
         OSC_INIT.store(false, Ordering::Relaxed);
+    }
+}
+
+impl OscToken {
+    fn new() -> OscToken {
+        OscToken { _private: () }
     }
 }
