@@ -28,24 +28,19 @@ extern fn main() {
         setup_bss();
     }
 
-    let (mcg,osc) = unsafe {
-        (mcg::Mcg::new(),
-         osc::Osc::new())
-    };
-
-    let mut sim = sim::Sim::new();
-
     // Enable the crystal oscillator with 10pf of capacitance
-    osc.enable(10);
+    osc::Osc::new().enable(10);
 
     // Set our clocks:
     // core: 72Mhz
     // peripheral: 36MHz
     // flash: 24MHz
+    let mut sim = sim::Sim::new();
     sim.set_dividers(1, 2, 3);
     // We would also set the USB divider here if we wanted to use it.
 
     // Now we can start setting up the MCG for our needs.
+    let mcg = mcg::Mcg::new();
     if let mcg::Clock::Fei(mut fei) = mcg.clock() {
         // Our 16MHz xtal is "very fast", and needs to be divided
         // by 512 to be in the acceptable FLL range.
