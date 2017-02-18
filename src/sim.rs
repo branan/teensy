@@ -4,8 +4,6 @@ use bit_field::BitField;
 use core::sync::atomic::{AtomicBool,ATOMIC_BOOL_INIT,Ordering};
 
 pub enum Clock {
-    PortB,
-    PortC,
     Uart0
 }
 
@@ -41,6 +39,10 @@ pub struct Sim {
     sim: &'static mut SimRegs
 }
 
+pub struct ClockGate {
+    gate: &'static mut Volatile<u32>
+}
+
 static SIM_INIT: AtomicBool = ATOMIC_BOOL_INIT;
 
 impl Sim {
@@ -57,21 +59,25 @@ impl Sim {
 
     pub fn enable_clock(&mut self, clock: Clock) {
         match clock {
-            Clock::PortC => {
-                self.sim.scgc5.update(|scgc| {
-                    scgc.set_bit(11, true);
-                });
-            }
-            Clock::PortB => {
-                self.sim.scgc5.update(|scgc| {
-                    scgc.set_bit(10, true);
-                });
-            }
             Clock::Uart0 => {
                 self.sim.scgc4.update(|scgc| {
                     scgc.set_bit(10, true);
                 });
             }
+        }
+    }
+
+    pub fn port(&mut self, port: super::port::PortName) -> super::port::Port {
+        let gate = match port {
+            super::port::PortName::B => ClockGate::new(5, 10),
+            super::port::PortName::C => ClockGate::new(5, 11),
+        };
+        if gate.gate.read() != 0 {
+            panic!("Cannot create Port instance; it is already in use");
+        }
+        gate.gate.write(1);
+        unsafe {
+            super::port::Port::new(port, gate)
         }
     }
 
@@ -87,5 +93,25 @@ impl Sim {
 impl Drop for Sim {
     fn drop(&mut self) {
         SIM_INIT.store(false, Ordering::Relaxed);
+    }
+}
+
+impl ClockGate {
+    fn new(reg: usize, bit: usize) -> ClockGate {
+        assert!(reg <= 7);
+        assert!(bit <= 31);
+        let base: usize = 0x42900500;
+        let reg_offset = 128 * (reg - 1);
+        let bit_offset = 4 * bit;
+        let ptr = (base + reg_offset + bit_offset) as *mut Volatile<u32>;
+        unsafe {
+            ClockGate { gate: &mut *ptr }
+        }
+    }
+}
+
+impl Drop for ClockGate {
+    fn drop(&mut self) {
+        self.gate.write(0);
     }
 }

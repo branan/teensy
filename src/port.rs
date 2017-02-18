@@ -7,7 +7,7 @@ pub enum PortName {
 }
 
 #[repr(C,packed)]
-pub struct Port {
+struct PortRegs {
     pcr: [Volatile<u32>; 32],
     gplcr: Volatile<u32>,
     gpchr: Volatile<u32>,
@@ -17,6 +17,11 @@ pub struct Port {
     dfer: Volatile<u32>,
     dfcr: Volatile<u32>,
     dfwr: Volatile<u32>
+}
+
+pub struct Port {
+    port: &'static mut PortRegs,
+    _gate: super::sim::ClockGate,
 }
 
 pub struct Pin {
@@ -43,11 +48,13 @@ pub struct Gpio {
 }
 
 impl Port {
-    pub unsafe fn new(name: PortName) -> &'static mut Port {
-        &mut * match name {
-            PortName::B => 0x4004A000 as *mut Port,
-            PortName::C => 0x4004B000 as *mut Port
-        }
+    pub unsafe fn new(name: PortName, gate: super::sim::ClockGate) -> Port {
+        let myself = &mut * match name {
+            PortName::B => 0x4004A000 as *mut PortRegs,
+            PortName::C => 0x4004B000 as *mut PortRegs
+        };
+
+        Port { port: myself, _gate: gate }
     }
 
     pub unsafe fn pin(&mut self, p: usize) -> Pin {
@@ -55,13 +62,13 @@ impl Port {
     }
 
     pub unsafe fn set_pin_mode(&mut self, p: usize, mode: u32) {
-        self.pcr[p].update(|pcr| {
+        self.port.pcr[p].update(|pcr| {
             pcr.set_bits(8..11, mode);
         });
     }
 
     pub fn name(&self) -> PortName {
-        let addr = (self as *const Port) as u32;
+        let addr = (self.port as *const PortRegs) as u32;
         match addr {
             0x4004A000 => PortName::B,
             0x4004B000 => PortName::C,

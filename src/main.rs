@@ -28,10 +28,9 @@ extern fn main() {
     };
     wdog.disable();
 
-    let (mcg,osc,pin) = unsafe {
+    let (mcg,osc) = unsafe {
         (mcg::Mcg::new(),
-         osc::Osc::new(),
-         port::Port::new(port::PortName::C).pin(5))
+         osc::Osc::new())
     };
 
     let mut sim = sim::Sim::new();
@@ -39,9 +38,6 @@ extern fn main() {
     unsafe { setup_bss() };
     // Enable the crystal oscillator with 10pf of capacitance
     osc.enable(10);
-    // Turn on the Port C clock gate
-    sim.enable_clock(sim::Clock::PortC);
-    sim.enable_clock(sim::Clock::PortB);
     sim.enable_clock(sim::Clock::Uart0);
     // Set our clocks:
     // core: 72Mhz
@@ -63,14 +59,18 @@ extern fn main() {
     } else {
         panic!("Somehow the clock wasn't in FEI mode");
     }
+    let mut portb = sim.port(port::PortName::B);
+    let mut portc = sim.port(port::PortName::C);
 
     // Initialize the UART as our panic writer
     unsafe {
-        let rx = port::Port::new(port::PortName::B).pin(16).make_rx();
-        let tx = port::Port::new(port::PortName::B).pin(17).make_tx();
+        let rx = portb.pin(16).make_rx();
+        let tx = portb.pin(17).make_tx();
         let uart = uart::Uart::new(0, Some(rx), Some(tx), (468, 24));
         WRITER = Some(uart);
     };
+
+    let pin = unsafe { portc.pin(5) };
 
     let mut gpio = pin.make_gpio();
 
