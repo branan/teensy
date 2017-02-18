@@ -3,7 +3,7 @@ use bit_field::BitField;
 
 use core;
 
-use super::port::{Rx,Tx};
+use super::{Rx,Tx};
 
 #[repr(C,packed)]
 struct UartRegs {

@@ -3,6 +3,8 @@ use bit_field::BitField;
 
 use core::sync::atomic::{AtomicBool,ATOMIC_BOOL_INIT,Ordering};
 
+use super::{Port,PortName,Rx,Tx,Uart};
+
 #[repr(C,packed)]
 struct SimRegs {
     sopt1: Volatile<u32>,
@@ -53,21 +55,21 @@ impl Sim {
         Sim {sim: regs}
     }
 
-    pub fn port(&mut self, port: super::port::PortName) -> super::port::Port {
+    pub fn port(&mut self, port: PortName) -> Port {
         let gate = match port {
-            super::port::PortName::B => ClockGate::new(5, 10),
-            super::port::PortName::C => ClockGate::new(5, 11),
+            PortName::B => ClockGate::new(5, 10),
+            PortName::C => ClockGate::new(5, 11),
         };
         if gate.gate.read() != 0 {
             panic!("Cannot create Port instance; it is already in use");
         }
         gate.gate.write(1);
         unsafe {
-            super::port::Port::new(port, gate)
+            Port::new(port, gate)
         }
     }
 
-    pub fn uart<'a, 'b>(&mut self, uart: u8, rx: Option<super::port::Rx<'a>>, tx: Option<super::port::Tx<'b>>, clkdiv: (u16, u8)) -> super::uart::Uart<'a, 'b> {
+    pub fn uart<'a, 'b>(&mut self, uart: u8, rx: Option<Rx<'a>>, tx: Option<Tx<'b>>, clkdiv: (u16, u8)) -> Uart<'a, 'b> {
         let gate = match uart {
             0 => ClockGate::new(4, 10),
             _ => panic!("Cannot enable clock for UART {}", uart)
@@ -77,7 +79,7 @@ impl Sim {
         }
         gate.gate.write(1);
         unsafe {
-            super::uart::Uart::new(uart, rx, tx, clkdiv)
+            Uart::new(uart, rx, tx, clkdiv)
         }
     }
 

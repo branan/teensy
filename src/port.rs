@@ -4,6 +4,8 @@ use bit_field::BitField;
 use core::cell::UnsafeCell;
 use core::sync::atomic::{AtomicBool,Ordering};
 
+use super::ClockGate;
+
 pub enum PortName {
     B,
     C
@@ -21,7 +23,7 @@ struct PortRegs {
 pub struct Port {
     port: UnsafeCell<&'static mut PortRegs>,
     locks: [AtomicBool; 32],
-    _gate: super::sim::ClockGate,
+    _gate: ClockGate,
 }
 
 pub struct Pin<'a> {
@@ -55,7 +57,7 @@ pub struct Gpio<'a> {
 }
 
 impl Port {
-    pub unsafe fn new(name: PortName, gate: super::sim::ClockGate) -> Port {
+    pub unsafe fn new(name: PortName, gate: ClockGate) -> Port {
         let myself = &mut * match name {
             PortName::B => 0x4004A000 as *mut PortRegs,
             PortName::C => 0x4004B000 as *mut PortRegs

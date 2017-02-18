@@ -15,36 +15,43 @@ mod sim;
 mod uart;
 mod watchdog;
 
+use mcg::*;
+use osc::*;
+use port::*;
+use sim::*;
+use uart::*;
+use watchdog::*;
+
 use core::slice;
 use core::fmt::Write;
 use volatile::Volatile;
 
-static mut WRITER: Option<&'static mut uart::Uart> = None;
+static mut WRITER: Option<&'static mut Uart> = None;
 
 #[allow(empty_loop)]
 extern fn main() {
     unsafe {
-        watchdog::Watchdog::new().disable();
+        Watchdog::new().disable();
         setup_bss();
     }
 
     // Enable the crystal oscillator with 10pf of capacitance
-    osc::Osc::new().enable(10);
+    Osc::new().enable(10);
 
     // Set our clocks:
     // core: 72Mhz
     // peripheral: 36MHz
     // flash: 24MHz
-    let mut sim = sim::Sim::new();
+    let mut sim = Sim::new();
     sim.set_dividers(1, 2, 3);
     // We would also set the USB divider here if we wanted to use it.
 
     // Now we can start setting up the MCG for our needs.
-    let mcg = mcg::Mcg::new();
-    if let mcg::Clock::Fei(mut fei) = mcg.clock() {
+    let mcg = Mcg::new();
+    if let Clock::Fei(mut fei) = mcg.clock() {
         // Our 16MHz xtal is "very fast", and needs to be divided
         // by 512 to be in the acceptable FLL range.
-        fei.enable_xtal(mcg::OscRange::VeryHigh);
+        fei.enable_xtal(OscRange::VeryHigh);
         let fbe = fei.use_external(512);
 
         // PLL is 27/6 * xtal == 72MHz
@@ -55,7 +62,7 @@ extern fn main() {
     }
 
     // Initialize the UART as our panic writer
-    let portb = sim.port(port::PortName::B);
+    let portb = sim.port(PortName::B);
     let rx = portb.pin(16).make_rx();
     let tx = portb.pin(17).make_tx();
     let mut uart = sim.uart(0, Some(rx), Some(tx), (468, 24));
@@ -70,7 +77,7 @@ extern fn main() {
         WRITER = Some(core::mem::transmute(&mut uart));
     };
 
-    let portc = sim.port(port::PortName::C);
+    let portc = sim.port(PortName::C);
     let mut gpio = portc.pin(5).make_gpio();
     gpio.output();
     gpio.high();
