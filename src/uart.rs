@@ -3,7 +3,7 @@ use bit_field::BitField;
 
 use core;
 
-use super::{Rx,Tx};
+use super::{ClockGate,Rx,Tx};
 
 #[repr(C,packed)]
 struct UartRegs {
@@ -28,10 +28,11 @@ pub struct Uart<'a, 'b> {
     uart: &'static mut UartRegs,
     _rx: Option<Rx<'a>>,
     _tx: Option<Tx<'b>>,
+    _gate: ClockGate
 }
 
 impl <'a, 'b> Uart<'a, 'b> {
-    pub unsafe fn new(id: u8, rx: Option<Rx<'a>>, tx: Option<Tx<'b>>, clkdiv: (u16,u8)) -> Uart<'a, 'b> {
+    pub unsafe fn new(id: u8, rx: Option<Rx<'a>>, tx: Option<Tx<'b>>, clkdiv: (u16,u8), gate: ClockGate) -> Uart<'a, 'b> {
         if let Some(r) = rx.as_ref() {
             if r.uart() != id {
                 panic!("Invalid RX pin for UART {}", id);
@@ -67,7 +68,7 @@ impl <'a, 'b> Uart<'a, 'b> {
             c2.set_bit(3, tx.is_some());
         });
 
-        Uart {uart: uart, _tx: tx, _rx: rx}
+        Uart {uart: uart, _tx: tx, _rx: rx, _gate: gate}
     }
 }
 

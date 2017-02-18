@@ -79,7 +79,7 @@ impl Sim {
         }
         gate.gate.write(1);
         unsafe {
-            Uart::new(uart, rx, tx, clkdiv)
+            Uart::new(uart, rx, tx, clkdiv, gate)
         }
     }
 
