@@ -9,14 +9,10 @@ pub enum PortName {
 #[repr(C,packed)]
 pub struct Port {
     pcr: [Volatile<u32>; 32],
-    gplcr: Volatile<u32>,
+    gpclr: Volatile<u32>,
     gpchr: Volatile<u32>,
     reserved_0: [u8; 24],
     isfr: Volatile<u32>,
-    reserved_1: [u8; 28],
-    dfer: Volatile<u32>,
-    dfcr: Volatile<u32>,
-    dfwr: Volatile<u32>
 }
 
 pub struct Pin {
