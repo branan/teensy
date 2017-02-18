@@ -59,8 +59,8 @@ extern fn main() {
     } else {
         panic!("Somehow the clock wasn't in FEI mode");
     }
-    let mut portb = sim.port(port::PortName::B);
-    let mut portc = sim.port(port::PortName::C);
+    let portb = sim.port(port::PortName::B);
+    let portc = sim.port(port::PortName::C);
 
     // Initialize the UART as our panic writer
     unsafe {
@@ -70,7 +70,7 @@ extern fn main() {
         WRITER = Some(uart);
     };
 
-    let pin = unsafe { portc.pin(5) };
+    let pin = portc.pin(5);
 
     let mut gpio = pin.make_gpio();
 
