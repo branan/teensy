@@ -23,10 +23,10 @@ static mut WRITER: Option<&'static mut uart::Uart> = None;
 
 #[allow(empty_loop)]
 extern fn main() {
-    let wdog = unsafe {
-        watchdog::Watchdog::new()
-    };
-    wdog.disable();
+    unsafe {
+        watchdog::Watchdog::new().disable();
+        setup_bss();
+    }
 
     let (mcg,osc) = unsafe {
         (mcg::Mcg::new(),
@@ -35,7 +35,6 @@ extern fn main() {
 
     let mut sim = sim::Sim::new();
 
-    unsafe { setup_bss() };
     // Enable the crystal oscillator with 10pf of capacitance
     osc.enable(10);
     sim.enable_clock(sim::Clock::Uart0);
