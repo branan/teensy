@@ -6,7 +6,7 @@ use core;
 use super::port::{Rx,Tx};
 
 #[repr(C,packed)]
-pub struct Uart {
+struct UartRegs {
     bdh: Volatile<u8>,
     bdl: Volatile<u8>,
     c1: Volatile<u8>,
@@ -24,9 +24,14 @@ pub struct Uart {
     ir: Volatile<u8>,
 }
 
+pub struct Uart<'a, 'b> {
+    uart: &'static mut UartRegs,
+    _rx: Option<Rx<'a>>,
+    _tx: Option<Tx<'b>>,
+}
 
-impl Uart {
-    pub unsafe fn new(id: u8, rx: Option<Rx>, tx: Option<Tx>, clkdiv: (u16,u8)) -> &'static mut Uart {
+impl <'a, 'b> Uart<'a, 'b> {
+    pub unsafe fn new(id: u8, rx: Option<Rx<'a>>, tx: Option<Tx<'b>>, clkdiv: (u16,u8)) -> Uart<'a, 'b> {
         if let Some(r) = rx.as_ref() {
             if r.uart() != id {
                 panic!("Invalid RX pin for UART {}", id);
@@ -45,7 +50,7 @@ impl Uart {
         }
 
         let uart = match id {
-            0 => &mut *(0x4006A000 as *mut Uart),
+            0 => &mut *(0x4006A000 as *mut UartRegs),
             _ => panic!("Invalid UART id: {}", id)
         };
 
@@ -62,17 +67,17 @@ impl Uart {
             c2.set_bit(3, tx.is_some());
         });
 
-        uart
+        Uart {uart: uart, _tx: tx, _rx: rx}
     }
 }
 
-impl core::fmt::Write for Uart {
+impl <'a, 'b> core::fmt::Write for Uart<'a, 'b> {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
         for b in s.bytes() {
-            while !self.s1.read().get_bit(7) {}
-            self.d.write(b);
+            while !self.uart.s1.read().get_bit(7) {}
+            self.uart.d.write(b);
         }
-        while !self.s1.read().get_bit(6) {}
+        while !self.uart.s1.read().get_bit(6) {}
         Ok(())
     }
 }

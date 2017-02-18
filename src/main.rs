@@ -1,6 +1,6 @@
 #![feature(lang_items,asm,plugin)]
 #![plugin(clippy)]
-//#![deny(warnings)]
+#![deny(warnings)]
 #![no_std]
 #![no_main]
 #![no_builtins]
@@ -37,7 +37,7 @@ extern fn main() {
 
     // Enable the crystal oscillator with 10pf of capacitance
     osc.enable(10);
-    sim.enable_clock(sim::Clock::Uart0);
+
     // Set our clocks:
     // core: 72Mhz
     // peripheral: 36MHz
@@ -58,21 +58,25 @@ extern fn main() {
     } else {
         panic!("Somehow the clock wasn't in FEI mode");
     }
-    let portb = sim.port(port::PortName::B);
-    let portc = sim.port(port::PortName::C);
 
     // Initialize the UART as our panic writer
+    let portb = sim.port(port::PortName::B);
+    let rx = portb.pin(16).make_rx();
+    let tx = portb.pin(17).make_tx();
+    let mut uart = sim.uart(0, Some(rx), Some(tx), (468, 24));
+
+    // we are casting a stack variable to have a 'static
+    // lifetime. This is horrendously unsafe, but works as long as
+    // main never returns. Since main returning causes a system reset,
+    // we can be fairly confident of this.
+    //
+    // Don't do this anywhere but in main.
     unsafe {
-        let rx = portb.pin(16).make_rx();
-        let tx = portb.pin(17).make_tx();
-        let uart = uart::Uart::new(0, Some(rx), Some(tx), (468, 24));
-        WRITER = Some(uart);
+        WRITER = Some(core::mem::transmute(&mut uart));
     };
 
-    let pin = portc.pin(5);
-
-    let mut gpio = pin.make_gpio();
-
+    let portc = sim.port(port::PortName::C);
+    let mut gpio = portc.pin(5).make_gpio();
     gpio.output();
     gpio.high();
 
@@ -115,7 +119,7 @@ pub static _FLASHCONFIG: [u8; 16] = [
 pub extern fn rust_begin_panic(msg: core::fmt::Arguments,
                                file: &'static str,
                                line: u32) -> ! {
-    if let Some(mut uart) = unsafe { WRITER.as_mut() } {
+    if let Some(uart) = unsafe { WRITER.as_mut() } {
         write!(uart, "panicked at '").unwrap();
         uart.write_fmt(msg).unwrap();
         write!(uart, "', {}:{}\n", file, line).unwrap();

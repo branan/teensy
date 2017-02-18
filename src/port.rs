@@ -29,8 +29,15 @@ pub struct Pin<'a> {
     pin: usize
 }
 
-pub struct Tx(u8);
-pub struct Rx(u8);
+pub struct Tx<'a> {
+    uart: u8,
+    _pin: Pin<'a>
+}
+
+pub struct Rx<'a> {
+    uart: u8,
+    _pin: Pin<'a>
+}
 
 #[repr(C,packed)]
 struct GpioBitband {
@@ -107,24 +114,24 @@ impl <'a> Pin<'a> {
         }
     }
 
-    pub fn make_rx(self) -> Rx {
+    pub fn make_rx(self) -> Rx<'a> {
         unsafe {
             match (self.port.name(), self.pin) {
                 (PortName::B, 16) => {
                     self.port.set_pin_mode(self.pin, 3);
-                    Rx(0)
+                    Rx {_pin: self, uart: 0}
                 },
                 _ => panic!("Invalid serial RX pin")
             }
         }
     }
 
-    pub fn make_tx(self) -> Tx {
+    pub fn make_tx(self) -> Tx<'a> {
         unsafe {
             match (self.port.name(), self.pin) {
                 (PortName::B, 17) => {
                     self.port.set_pin_mode(self.pin, 3);
-                    Tx(0)
+                    Tx {_pin: self, uart: 0}
                 },
                 _ => panic!("Invalid serial TX pin")
             }
@@ -163,14 +170,14 @@ impl <'a> Gpio<'a>  {
     }
 }
 
-impl Rx {
+impl <'a> Rx<'a> {
     pub fn uart(&self) -> u8 {
-        self.0
+        self.uart
     }
 }
 
-impl Tx {
+impl <'a> Tx<'a> {
     pub fn uart(&self) -> u8 {
-        self.0
+        self.uart
     }
 }

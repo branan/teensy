@@ -3,10 +3,6 @@ use bit_field::BitField;
 
 use core::sync::atomic::{AtomicBool,ATOMIC_BOOL_INIT,Ordering};
 
-pub enum Clock {
-    Uart0
-}
-
 #[repr(C,packed)]
 struct SimRegs {
     sopt1: Volatile<u32>,
@@ -57,16 +53,6 @@ impl Sim {
         Sim {sim: regs}
     }
 
-    pub fn enable_clock(&mut self, clock: Clock) {
-        match clock {
-            Clock::Uart0 => {
-                self.sim.scgc4.update(|scgc| {
-                    scgc.set_bit(10, true);
-                });
-            }
-        }
-    }
-
     pub fn port(&mut self, port: super::port::PortName) -> super::port::Port {
         let gate = match port {
             super::port::PortName::B => ClockGate::new(5, 10),
@@ -78,6 +64,20 @@ impl Sim {
         gate.gate.write(1);
         unsafe {
             super::port::Port::new(port, gate)
+        }
+    }
+
+    pub fn uart<'a, 'b>(&mut self, uart: u8, rx: Option<super::port::Rx<'a>>, tx: Option<super::port::Tx<'b>>, clkdiv: (u16, u8)) -> super::uart::Uart<'a, 'b> {
+        let gate = match uart {
+            0 => ClockGate::new(4, 10),
+            _ => panic!("Cannot enable clock for UART {}", uart)
+        };
+        if gate.gate.read() != 0 {
+            panic!("Cannot create Uart instance; it is already in use");
+        }
+        gate.gate.write(1);
+        unsafe {
+            super::uart::Uart::new(uart, rx, tx, clkdiv)
         }
     }
 
