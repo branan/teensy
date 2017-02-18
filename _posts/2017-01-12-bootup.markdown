@@ -587,14 +587,10 @@ pub enum PortName {
 #[repr(C,packed)]
 pub struct Port {
     pcr: [u32; 32],
-    gplcr: u32,
+    gpclr: u32,
     gpchr: u32,
     reserved_0: [u8; 24],
     isfr: u32,
-    reserved_1: [u8; 28],
-    dfer: u32,
-    dfcr: u32,
-    dfwr: u32
 }
 
 impl Port {
