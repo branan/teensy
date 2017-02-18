@@ -21,7 +21,7 @@ struct PortRegs {
 }
 
 pub struct Port {
-    port: UnsafeCell<&'static mut PortRegs>,
+    reg: UnsafeCell<&'static mut PortRegs>,
     locks: [AtomicBool; 32],
     _gate: ClockGate,
 }
@@ -63,7 +63,7 @@ impl Port {
             PortName::C => 0x4004B000 as *mut PortRegs
         };
 
-        Port { port: UnsafeCell::new(myself), locks: Default::default(), _gate: gate }
+        Port { reg: UnsafeCell::new(myself), locks: Default::default(), _gate: gate }
     }
 
     pub fn pin(&self, p: usize) -> Pin {
@@ -76,7 +76,7 @@ impl Port {
     }
 
     pub fn name(&self) -> PortName {
-        let addr = (self.port() as *const PortRegs) as u32;
+        let addr = (self.reg() as *const PortRegs) as u32;
         match addr {
             0x4004A000 => PortName::B,
             0x4004B000 => PortName::C,
@@ -86,7 +86,7 @@ impl Port {
 
     unsafe fn set_pin_mode(&self, p: usize, mode: u32) {
         assert!(p < 32);
-        self.port().pcr[p].update(|pcr| {
+        self.reg().pcr[p].update(|pcr| {
             pcr.set_bits(8..11, mode);
         });
     }
@@ -96,14 +96,14 @@ impl Port {
         self.locks[p].store(false, Ordering::Relaxed);
     }
 
-    fn port(&self) -> &'static mut PortRegs {
+    fn reg(&self) -> &'static mut PortRegs {
         // NOTE: This does no validation. It's on the calling
         // functions to ensure they're not accessing the same
         // registers from multiple codepaths. If they can't make those
         // guarantees, they should be marked as `unsafe` (See
         // `set_pin_mode` as an example).
         unsafe {
-            *self.port.get()
+            *self.reg.get()
         }
     }
 }

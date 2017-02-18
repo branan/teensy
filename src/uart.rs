@@ -25,7 +25,7 @@ struct UartRegs {
 }
 
 pub struct Uart<'a, 'b> {
-    uart: &'static mut UartRegs,
+    reg: &'static mut UartRegs,
     _rx: Option<Rx<'a>>,
     _tx: Option<Tx<'b>>,
     _gate: ClockGate
@@ -68,17 +68,17 @@ impl <'a, 'b> Uart<'a, 'b> {
             c2.set_bit(3, tx.is_some());
         });
 
-        Uart {uart: uart, _tx: tx, _rx: rx, _gate: gate}
+        Uart {reg: uart, _tx: tx, _rx: rx, _gate: gate}
     }
 }
 
 impl <'a, 'b> core::fmt::Write for Uart<'a, 'b> {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
         for b in s.bytes() {
-            while !self.uart.s1.read().get_bit(7) {}
-            self.uart.d.write(b);
+            while !self.reg.s1.read().get_bit(7) {}
+            self.reg.d.write(b);
         }
-        while !self.uart.s1.read().get_bit(6) {}
+        while !self.reg.s1.read().get_bit(6) {}
         Ok(())
     }
 }

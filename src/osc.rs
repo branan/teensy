@@ -9,7 +9,7 @@ struct OscRegs {
 }
 
 pub struct Osc {
-    osc: &'static mut OscRegs
+    reg: &'static mut OscRegs
 }
 
 pub struct OscToken {
@@ -24,8 +24,8 @@ impl Osc {
         if was_init {
             panic!("Cannot initialize OSC: It's already active");
         }
-        let regs = unsafe { &mut *(0x40065000 as *mut OscRegs) };
-        Osc {osc: regs}
+        let reg = unsafe { &mut *(0x40065000 as *mut OscRegs) };
+        Osc {reg: reg}
     }
 
     pub fn enable(&mut self, capacitance: u8) -> OscToken {
@@ -45,7 +45,7 @@ impl Osc {
         // enable the crystal oscillator
         cr.set_bit(7, true);
 
-        self.osc.cr.write(cr);
+        self.reg.cr.write(cr);
         OscToken::new()
     }
 }

@@ -34,7 +34,7 @@ struct SimRegs {
 }
 
 pub struct Sim {
-    sim: &'static mut SimRegs
+    reg: &'static mut SimRegs
 }
 
 pub struct ClockGate {
@@ -49,10 +49,10 @@ impl Sim {
         if was_init {
             panic!("Cannot initialize SIM: It's already active");
         }
-        let regs = unsafe {
+        let reg = unsafe {
             &mut *(0x40047000 as *mut SimRegs)
         };
-        Sim {sim: regs}
+        Sim {reg: reg}
     }
 
     pub fn port(&mut self, port: PortName) -> Port {
@@ -88,7 +88,7 @@ impl Sim {
         clkdiv.set_bits(28..32, core-1);
         clkdiv.set_bits(24..28, bus-1);
         clkdiv.set_bits(16..20, flash-1);
-        self.sim.clkdiv1.write(clkdiv);
+        self.reg.clkdiv1.write(clkdiv);
     }
 }
 

@@ -25,7 +25,7 @@ struct McgRegs {
 }
 
 pub struct Mcg {
-    mcg: &'static mut McgRegs
+    reg: &'static mut McgRegs
 }
 
 pub struct Fei {
@@ -54,16 +54,16 @@ impl Mcg {
         if was_init {
             panic!("Cannot initialize MCG: It's already active");
         }
-        let regs = unsafe { &mut *(0x40064000 as *mut McgRegs) };
-        Mcg {mcg: regs}
+        let reg = unsafe { &mut *(0x40064000 as *mut McgRegs) };
+        Mcg {reg: reg}
     }
 
     pub fn clock(self) -> Clock {
         let source: OscSource = unsafe {
-            mem::transmute(self.mcg.c1.read().get_bits(6..8))
+            mem::transmute(self.reg.c1.read().get_bits(6..8))
         };
-        let fll_internal = self.mcg.c1.read().get_bit(2);
-        let pll_enabled = self.mcg.c6.read().get_bit(6);
+        let fll_internal = self.reg.c1.read().get_bit(2);
+        let pll_enabled = self.reg.c6.read().get_bit(6);
 
         match (fll_internal, pll_enabled, source) {
             (true, false, OscSource::LockedLoop) => Clock::Fei(Fei{ mcg: self }),
@@ -96,17 +96,17 @@ enum OscSource {
 
 impl Fei {
     pub fn enable_xtal(&mut self, range: OscRange, _token: OscToken) {
-        self.mcg.mcg.c2.update(|c2| {
+        self.mcg.reg.c2.update(|c2| {
             c2.set_bits(4..6, range as u8);
             c2.set_bit(2, true);
         });
 
         // Wait for the crystal oscillator to become enabled.
-        while !self.mcg.mcg.s.read().get_bit(1) {}
+        while !self.mcg.reg.s.read().get_bit(1) {}
     }
 
     pub fn use_external(self, divide: u32) -> Fbe {
-        let osc = self.mcg.mcg.c2.read().get_bits(4..6);
+        let osc = self.mcg.reg.c2.read().get_bits(4..6);
         let frdiv = if osc == OscRange::Low as u8 {
             match divide {
                 1 => 0,
@@ -133,7 +133,7 @@ impl Fei {
             }
         };
 
-        self.mcg.mcg.c1.update(|c1| {
+        self.mcg.reg.c1.update(|c1| {
             c1.set_bits(6..8, OscSource::External as u8);
             c1.set_bits(3..6, frdiv);
             c1.set_bit(2, false);
@@ -143,8 +143,8 @@ impl Fei {
         // the new clock to stabilize before we move on.
         // First: Wait for the FLL to be pointed at the crystal
         // Then: Wait for our clock source to be the crystal osc
-        while self.mcg.mcg.s.read().get_bit(4) {}
-        while self.mcg.mcg.s.read().get_bits(2..4) != OscSource::External as u8 {}
+        while self.mcg.reg.s.read().get_bit(4) {}
+        while self.mcg.reg.s.read().get_bits(2..4) != OscSource::External as u8 {}
 
         Fbe { mcg: self.mcg }
     }
@@ -160,19 +160,19 @@ impl Fbe {
             panic!("Invalid PLL reference divide factor: {}", denominator);
         }
 
-        self.mcg.mcg.c5.update(|c5| {
+        self.mcg.reg.c5.update(|c5| {
             c5.set_bits(0..5, denominator - 1);
         });
 
-        self.mcg.mcg.c6.update(|c6| {
+        self.mcg.reg.c6.update(|c6| {
             c6.set_bits(0..6, numerator - 24);
             c6.set_bit(6, true);
         });
 
         // Wait for PLL to be enabled, using the crystal oscillator
-        while !self.mcg.mcg.s.read().get_bit(5) {}
+        while !self.mcg.reg.s.read().get_bit(5) {}
         // Wait for the PLL to be "locked" and stable
-        while !self.mcg.mcg.s.read().get_bit(6) {}
+        while !self.mcg.reg.s.read().get_bit(6) {}
 
         Pbe { mcg: self.mcg }
     }
@@ -180,7 +180,7 @@ impl Fbe {
 
 impl Pbe {
     pub fn use_pll(self) {
-        self.mcg.mcg.c1.update(|c1| {
+        self.mcg.reg.c1.update(|c1| {
             c1.set_bits(6..8, OscSource::LockedLoop as u8);
         });
 
@@ -190,6 +190,6 @@ impl Pbe {
         // and the PLL at 3. Instead of adding a value to OscSource
         // which would be invalid to set, we just check for the known
         // value "3" here.
-        while self.mcg.mcg.s.read().get_bits(2..4) != 3 {}
+        while self.mcg.reg.s.read().get_bits(2..4) != 3 {}
     }
 }
