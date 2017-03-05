@@ -1,4 +1,4 @@
-#![feature(lang_items,asm,plugin)]
+#![feature(lang_items,asm,plugin,drop_types_in_const)]
 #![plugin(clippy)]
 #![deny(warnings)]
 #![no_std]
@@ -26,7 +26,8 @@ use core::slice;
 use core::fmt::Write;
 use volatile::Volatile;
 
-static mut WRITER: Option<&'static mut Uart> = None;
+static mut PORT: Option<Port> = None;
+static mut WRITER: Option<Uart<'static, 'static>> = None;
 
 #[allow(empty_loop)]
 extern fn main() {
@@ -61,20 +62,13 @@ extern fn main() {
         panic!("Somehow the clock wasn't in FEI mode");
     }
 
-    // Initialize the UART as our panic writer
-    let portb = sim.port(PortName::B);
-    let rx = portb.pin(16).make_rx();
-    let tx = portb.pin(17).make_tx();
-    let mut uart = sim.uart(0, Some(rx), Some(tx), (468, 24));
-
-    // we are casting a stack variable to have a 'static
-    // lifetime. This is horrendously unsafe, but works as long as
-    // main never returns. Since main returning causes a system reset,
-    // we can be fairly confident of this.
-    //
-    // Don't do this anywhere but in main.
+    // Initialize the UART as our panic writer. This is unsafe because
+    // we are modifying a global variable.
     unsafe {
-        WRITER = Some(core::mem::transmute(&mut uart));
+        PORT = Some(sim.port(PortName::B));
+        let rx = PORT.as_ref().unwrap().pin(16).make_rx();
+        let tx = PORT.as_ref().unwrap().pin(17).make_tx();
+        WRITER = Some(sim.uart(0, Some(rx), Some(tx), (468, 24)));
     };
 
     let portc = sim.port(PortName::C);
