@@ -1,0 +1,622 @@
+---
+layout: post
+title: "Part 3: Improving Safety"
+date: 2017-05-08 20:00:00 -800
+Categories: teensy
+---
+
+## Overview
+
+Our goal in this post is to eliminate as much unsafe code from `main`
+as possible. We will do this by using Rust's type and lifetime systems
+to enforce hardware invariants. This is similar to what we did in the
+previous post for clock modes, but across all of our code.
+
+We're not going to end up with any new behaviors by the end of this
+post. We're just laying a foundation of ways to think about using
+Rust's safety features for hardware.
+
+### Hardware Allocation
+
+The overall idea behind this post is that hardware should be
+*allocated* before a bit of code can use it. This implies the same
+things as a memory allocation in Rust:
+
+* The allocation itself is unsafe, but creation of a wrapper that
+  handles deallocation is safe.
+
+* If user code attempts to allocation a resource that is unavailable,
+  we must fail in some way.
+
+Rust, of course, responds to a failure of memory allocation by
+aborting. In this blog series, we'll typically panic. I prefer panics
+to an `Option` or `Error` type since they allow the example code to
+follow the happy path without getting bogged down in
+unwrapping. Panics also make it possible for us to include a useful
+message indicating which hardware unit was incorrectly allocated.
+
+## The MCG and OSC
+
+We will start with the easiest structs to update. The hardware modules
+for the MCG and OSC are not dependant on any other modules, so they do
+not reqire the complexity that some of our other structs will.
+
+The update to the OSC looks like this:
+
+{% highlight rust %}
+use volatile::Volatile;
+use bit_field::BitField;
+
+use core::sync::atomic::{AtomicBool,ATOMIC_BOOL_INIT,Ordering};
+
+#[repr(C,packed)]
+struct OscRegs {
+    cr: Volatile<u8>
+}
+
+pub struct Osc {
+    reg: &'static mut OscRegs
+}
+
+static OSC_INIT: AtomicBool = ATOMIC_BOOL_INIT;
+
+impl Osc {
+    pub fn new() -> Osc {
+        let was_init = OSC_INIT.swap(true, Ordering::Relaxed);
+        if was_init {
+            panic!("Cannot initialize OSC: It's already active");
+        }
+        let reg = unsafe { &mut *(0x40065000 as *mut OscRegs) };
+        Osc {reg: reg}
+    }
+
+    pub fn enable(&mut self, capacitance: u8)  {
+    ...
+        self.reg.cr.write(cr);
+    }
+}
+
+impl Drop for Osc {
+    fn drop(&mut self) {
+        OSC_INIT.store(false, Ordering::Relaxed);
+    }
+}
+{% endhighlight %}
+
+There are lots of changes here. Let's go through them all:
+
+1. We have a new import for `AtomicBool`, and some related bits.
+2. The old `Osc` struct is now called `OscRegs`
+3. There is a new struct called `Osc`, which holds a reference to the
+   registers
+4. There is a new global `AtomicBool` acting as a flag to indicate
+   when there is an outstanding reference to the `Osc`.
+5. The `::new` function now returns an owned struct, instead of a
+   reference. It will also panic if there is already an instance of
+   `Osc` in use.
+6. We implement `Drop` for `Osc`, to indicate when there is no longer
+   an active instance, and it is safe to create a new one.
+
+It is important that we use an atomic boolean for this flag. Besides
+being friendly to Rust's rules for global variables,an atomic protects
+us from race conditions when accessing the OSC.
+
+The MCG struct is updated similarly, and uses an identical allocation
+pattern. An important addition with the MCG is that each of the clock
+state structs now *own* the MCG instance, and pass that ownership down
+the chain as the clock state is changed. Here's all of the MCG
+code. I've left out the change to indirect all register accesses
+through the `regs` member, since that would balloon this example.
+
+{% highlight rust %}
+use core::mem;
+use volatile::Volatile;
+use bit_field::BitField;
+
+use super::OscToken;
+
+use core::sync::atomic::{AtomicBool,ATOMIC_BOOL_INIT,Ordering};
+
+#[repr(C,packed)]
+struct McgRegs {
+    ...
+}
+
+pub struct Mcg {
+    reg: &'static mut McgRegs
+}
+
+pub struct Fei {
+    mcg: Mcg
+}
+
+pub struct Fbe {
+    mcg: Mcg
+}
+
+pub struct Pbe {
+    mcg: Mcg
+}
+
+pub enum Clock {
+    Fei(Fei),
+    Fbe(Fbe),
+    Pbe(Pbe)
+}
+
+static MCG_INIT: AtomicBool = ATOMIC_BOOL_INIT;
+
+impl Mcg {
+    pub fn new() -> Mcg {
+        let was_init = MCG_INIT.swap(true, Ordering::Relaxed);
+        if was_init {
+            panic!("Cannot initialize MCG: It's already active");
+        }
+        let reg = unsafe { &mut *(0x40064000 as *mut McgRegs) };
+        Mcg {reg: reg}
+    }{
+
+    pub fn clock(self) -> Clock {
+    ...
+    }
+}
+
+impl Drop for Mcg {
+    fn drop(&mut self) {
+        MCG_INIT.store(false, Ordering::Relaxed);
+    }
+}
+{% endhighlight %}
+
+### Remember Your Invariants
+
+There is one more lingering piece of unsoundness in this code: The way
+we configure the MCG requires the OSC to be initialized, but nothing
+currently enforces this. We can fix this with a simple token type that
+indicates that the OSC is configured:
+
+{% highlight rust %}
+pub struct OscToken {
+    _private: ()
+}
+
+impl Osc {
+    pub fn enable(&mut self, capacitance: u8) -> OscToken {
+    ...
+    return OscToken::new()
+    }
+}
+
+impl OscToken {
+    fn new() -> OscToken {
+        OscToken { _private: () }
+    }
+}
+
+impl Fei {
+    pub fn enable_xtal(&mut self, range: OscRange, _token: OscToken) {
+    ...
+    }
+}
+{% endhighlight %}
+
+## The SIM
+
+Allocation for a `Sim` instance can be handled in the same way as for
+the MCG and OSC. We add an `AtomicBool` to act as a lock, and
+implement `Drop` to clear that lock when the `Sim` goes out of
+scope. I trust you can do this on your own at this point.
+
+### Clock Gates
+
+The next problem we face with the SIM is clock gates. Ideally, we want
+clock gating to be tied to the allocation of a hardware unit - it
+should be impossible to have an outstanding reference to a piece of
+hardware without its clock gate being enabled, and vice-versa. The
+first is necessary for safety reasons - accessing hardware that is
+disabled will cause a hardware fault. The second is for
+power-efficiency reasons. Any hardware we're not using should be
+turned off if possible.
+
+We'll handle this by moving allocation of most hardware units to the
+SIM. Let's start with Ports:
+
+{% highlight rust %}
+pub struct ClockGate {
+    gate: &'static mut Volatile<u32>
+}
+
+impl ClockGate {
+    fn new(reg: usize, bit: usize) -> ClockGate {
+        assert!(reg <= 7);
+        assert!(bit <= 31);
+        let base: usize = 0x42900500;
+        let reg_offset = 128 * (reg - 1);
+        let bit_offset = 4 * bit;
+        let ptr = (base + reg_offset + bit_offset) as *mut Volatile<u32>;
+        unsafe {
+            ClockGate { gate: &mut *ptr }
+        }
+    }
+}
+
+impl Drop for ClockGate {
+    fn drop(&mut self) {
+        self.gate.write(0);
+    }
+}
+
+impl Sim {
+    pub fn port(&mut self, port: PortName) -> Port {
+        let gate = match port {
+            PortName::B => ClockGate::new(5, 10),
+            PortName::C => ClockGate::new(5, 11),
+        };
+        if gate.gate.read() != 0 {
+            panic!("Cannot create Port instance; it is already in use");
+        }
+        gate.gate.write(1);
+        unsafe {
+            Port::new(port, gate)
+        }
+    }
+}
+{% endhighlight %}
+
+The new `ClockGate` struct uses the bitband to enable or disable a
+clock gate when it is created or dropped. The port allocation function
+passes ownership of the `ClockGate` to the `Port` instance. Let's take
+a look at that now:
+
+{% highlight rust %}
+pub struct Port {
+    reg: UnsafeCell<&'static mut PortRegs>,
+    locks: [AtomicBool; 32],
+    _gate: ClockGate,
+}
+
+impl Port {
+    pub unsafe fn new(name: PortName, gate: ClockGate) -> Port {
+        let myself = &mut * match name {
+            PortName::B => 0x4004A000 as *mut PortRegs,
+            PortName::C => 0x4004B000 as *mut PortRegs
+        };
+
+        Port { reg: UnsafeCell::new(myself), locks: Default::default(), _gate: gate }
+    }
+}
+{% endhighlight %}
+
+The move to a `PortRegs` struct is the same pattern we've seen for
+other hardware units so far. Wrapping the reference in `UnsafeCell` is
+due to how pins are handled - we'll cover that shortly. The `locks`
+member is also for safe pin handling. The `_gate` member keeps the
+appropriate clock gate enabled for as long as this `Port` instance
+exists. The `ClockGate` will be dropped when the `Port` is - precisely
+what we want.
+
+## Safe Pins
+
+Making pins safe requires some additional reasoning. Since a `Port`
+being dropped will cause the associated clock gate to be disabled, we
+know that a `Port` must outlive any associated `Pin`. This means that
+each `Pin` struct must borrow its parent `Port`. In order for multiple
+`Pins` to borrow a single `Port`, these must be immutable borrows.
+
+This has an important implication: It must be possible to allocate a
+`Pin` from a borrowed `Port` - possibly even simultaneously in
+separate tasks or interrupt handlers. This is a form of *internal
+mutability*, and is why the `PortRegs` reference is wrapped in an
+`UnsafeCell`. Internal mutability often requires a bit more attention
+to detail in order to ensure safety. I believe that this
+implementation is safe, although I welcome any suggestions.
+
+{% highlight rust %}
+pub struct Pin<'a> {
+    port: &'a Port,
+    pin: usize
+}
+
+pub struct Tx<'a> {
+    uart: u8,
+    _pin: Pin<'a>
+}
+
+pub struct Rx<'a> {
+    uart: u8,
+    _pin: Pin<'a>
+}
+
+#[repr(C,packed)]
+struct GpioBitband {
+    pdor: [Volatile<u32>; 32],
+    psor: [Volatile<u32>; 32],
+    pcor: [Volatile<u32>; 32],
+    ptor: [Volatile<u32>; 32],
+    pdir: [Volatile<u32>; 32],
+    pddr: [Volatile<u32>; 32]
+}
+
+pub struct Gpio<'a> {
+    gpio: *mut GpioBitband,
+    pin: Pin<'a>
+}
+
+impl Port {
+    pub fn pin(&self, p: usize) -> Pin {
+        assert!(p < 32);
+        let was_init = self.locks[p].swap(true, Ordering::Relaxed);
+        if was_init {
+            panic!("Pin {} is already in use", p);
+        }
+        Pin { port: self, pin: p }
+    }
+
+    unsafe fn set_pin_mode(&self, p: usize, mode: u32) {
+        assert!(p < 32);
+        self.reg().pcr[p].update(|pcr| {
+            pcr.set_bits(8..11, mode);
+        });
+    }
+
+    unsafe fn drop_pin(&self, p: usize) {
+        assert!(p < 32);
+        self.locks[p].store(false, Ordering::Relaxed);
+    }
+
+    fn reg(&self) -> &'static mut PortRegs {
+        // NOTE: This does no validation. It's on the calling
+        // functions to ensure they're not accessing the same
+        // registers from multiple codepaths. If they can't make those
+        // guarantees, they should be marked as `unsafe` (See
+        // `set_pin_mode` as an example).
+        unsafe {
+            *self.reg.get()
+        }
+    }
+}
+
+impl <'a> Drop for Pin<'a> {
+    fn drop(&mut self) {
+        unsafe {
+            self.port.drop_pin(self.pin);
+        }
+    }
+}
+{% endhighlight %}
+
+As before, each `Pin` is really referencing only a subset of the
+`Port` struct - the particular `pcr` register for that pin. This makes
+our usage of `UnsafeCell` in the `set_pin_mode` function safe, as long
+as the correct pin number is passed in. The various `Pin::make_*`
+functions enforce this invariant, wrapping the unsafe `set_pin_mode`
+in safe functions.
+
+The `Gpio`, `Tx`, and `Rx` structs now also hold on to their
+associated `Pin` struct. This is simply to ensure that the correct
+`Port` remains borrowed for as long as these structs are in scope.
+
+## Cleaning up the UART
+
+We're almost there! The UART has the most complex requirements, but
+they build off of everything we've done so far. Just like a `Port`, a
+`Uart` instance must hold on to a `ClockGate`. It also must keep track
+of the pins it is using, both to prevent the associated `Port` from
+being dropped, and to keep the pins themselves from being used
+elsewhere.
+
+We'll start by adding a `::Uart` method to the `Sim`, to do the
+allocation, and go from there by updating the `Uart` struct itself to
+own the various necessary structs. These are actually simpler changes
+than were necessary for the `Port` struct - we already did most of the
+heavy lifting when we made that safe!
+
+{% highlight rust %}
+impl Sim
+    pub fn uart<'a, 'b>(&mut self, uart: u8, rx: Option<Rx<'a>>, tx: Option<Tx<'b>>, clkdiv: (u16, u8)) -> Uart<'a, 'b> {
+        let gate = match uart {
+            0 => ClockGate::new(4, 10),
+            _ => panic!("Cannot enable clock for UART {}", uart)
+        };
+        if gate.gate.read() != 0 {
+            panic!("Cannot create Uart instance; it is already in use");
+        }
+        gate.gate.write(1);
+        unsafe {
+            Uart::new(uart, rx, tx, clkdiv, gate)
+        }
+    }
+}
+
+use volatile::Volatile;
+use bit_field::BitField;
+
+use core;
+
+use super::{ClockGate,Rx,Tx};
+
+#[repr(C,packed)]
+struct UartRegs {
+    ...
+}
+
+pub struct Uart<'a, 'b> {
+    reg: &'static mut UartRegs,
+    _rx: Option<Rx<'a>>,
+    _tx: Option<Tx<'b>>,
+    _gate: ClockGate
+}
+
+impl <'a, 'b> Uart<'a, 'b> {
+    pub unsafe fn new(id: u8, rx: Option<Rx<'a>>, tx: Option<Tx<'b>>, clkdiv: (u16,u8), gate: ClockGate) -> Uart<'a, 'b> {
+        ...
+        Uart {reg: uart, _tx: tx, _rx: rx, _gate: gate}
+    }
+}
+{% endhighlight %}
+
+## A New Segment
+
+Several of the updated structs above use global `AtomicBool` instances
+to keep track of whether they are in use. These booleans are stored in
+a new executable section called `.bss`. We must initialize all data in
+this section to zero at program startup.
+
+We'll add the new section to our linker script, then write a simple
+function to zero the data at startup.
+
+```
+SECTIONS
+{
+    ...
+    .bss : {
+         . = ORIGIN(RAM);
+         _bss_start = .;
+         *(.bss*)
+         _bss_end = .;
+    } > RAM
+    ...
+}
+```
+
+{% highlight rust %}
+#![no_builtins]
+
+extern {
+    static mut _bss_start: u8;
+    static mut _bss_end: u8;
+}
+
+unsafe fn setup_bss() {
+    let bss_start = &mut _bss_start as *mut u8;
+    let bss_end = &mut _bss_end as *mut u8;
+    let bss_len = bss_end as usize - bss_start as usize;
+    let bss = slice::from_raw_parts_mut(bss_start, bss_len);
+    for b in &mut bss.iter_mut() {
+        *b = 0;
+    }
+}
+{% endhighlight %}
+
+The new `no_builtins` crate attribute prevents the compiler from
+trying to convert our loop in `setup_bss` into a call to `memclr`,
+which does not exist in our embedded world. The new `setup_bss`
+function is also unsafe, since it directly manipulates memory that is
+in use by other parts of the program.
+
+## Printing Panics
+
+Our new code relies on panics quite frequently to indicate when
+something has gone wrong. Nothing should panic if you're following
+this series closely, but in the future we'll rely on panics in more
+complex code. We can use our UART to send panic messages back to a
+host computer, making it easier for us to track when something has
+gone wrong:
+
+{% highlight rust %}
+static mut PORT: Option<Port> = None;
+static mut WRITER: Option<Uart<'static, 'static>> = None;
+
+#[lang = "panic_fmt"]
+#[no_mangle]
+#[allow(empty_loop)]
+pub extern fn rust_begin_panic(msg: core::fmt::Arguments,
+                               file: &'static str,
+                               line: u32) -> ! {
+    if let Some(uart) = unsafe { WRITER.as_mut() } {
+        write!(uart, "panicked at '").unwrap();
+        uart.write_fmt(msg).unwrap();
+        write!(uart, "', {}:{}\n", file, line).unwrap();
+    }
+
+    // Reset the MCU after we've printed our panic.
+    let mut aircr = unsafe {
+        &mut *(0xE000ED0C as *mut Volatile<u32>)
+    };
+    aircr.write(0x05FA0004);
+    unreachable!();
+}
+{% endhighlight %}
+
+This code uses a couple of global variables to make a UART available
+to the panic printer. The printer also now resets the microcontroller,
+instead of hanging. This requires accessing a register we don't have a
+struct for yet, so we cheat and write to its address directly.
+
+## Putting it Together
+
+We've now expanded our types to use more of Rust's features to ensure
+safety. Let's put it all together with a new `main` that uses less
+unsafe code:
+
+{% highlight rust %}
+#[allow(empty_loop)]
+extern fn main() {
+    unsafe {
+        Watchdog::new().disable();
+        setup_bss();
+    }
+
+    // Enable the crystal oscillator with 10pf of capacitance
+    let osc_token = Osc::new().enable(10);
+
+    // Set our clocks:
+    // core: 72Mhz
+    // peripheral: 36MHz
+    // flash: 24MHz
+    let mut sim = Sim::new();
+    sim.set_dividers(1, 2, 3);
+    // We would also set the USB divider here if we wanted to use it.
+
+    // Now we can start setting up the MCG for our needs.
+    let mcg = Mcg::new();
+    if let Clock::Fei(mut fei) = mcg.clock() {
+        // Our 16MHz xtal is "very fast", and needs to be divided
+        // by 512 to be in the acceptable FLL range.
+        fei.enable_xtal(OscRange::VeryHigh, osc_token);
+        let fbe = fei.use_external(512);
+
+        // PLL is 27/6 * xtal == 72MHz
+        let pbe = fbe.enable_pll(27, 6);
+        pbe.use_pll();
+    } else {
+        panic!("Somehow the clock wasn't in FEI mode");
+    }
+
+    // Initialize the UART as our panic writer. This is unsafe because
+    // we are modifying a global variable.
+    unsafe {
+        PORT = Some(sim.port(PortName::B));
+        let rx = PORT.as_ref().unwrap().pin(16).make_rx();
+        let tx = PORT.as_ref().unwrap().pin(17).make_tx();
+        WRITER = Some(sim.uart(0, Some(rx), Some(tx), (468, 24)));
+    };
+
+    let portc = sim.port(PortName::C);
+    let mut gpio = portc.pin(5).make_gpio();
+    gpio.output();
+    gpio.high();
+
+    loop {};
+}
+{% endhighlight %}
+
+Two of our remaining uses of `unsafe` are clear: Clearing the `.bss`
+segment, as we discussed earlier, writes to memory that is used by
+other parts of the code. It must be unsafe. Modifying the globals used
+by the panic printer is also unsafe.
+
+But what about the watchdog? Any modification to the watchdog settings
+requires knowledge of how the program itself is structured. A
+misconfigured watchdog will reset the microcontroller at unexpected
+times - or fail to reset it when a program has failed. Since it is
+impossible to handle the coordination between watchdog settings and
+software design programmatically, it is better to leave it unsafe, to
+indicate that extreme caution is needed.
+
+## Next Time
+
+Now that we have patterns for allocating hardware units, we'll
+continue to expand our toolbox of hardware units. We'll configure
+interrupts and a timer to interact with some external hardware - a
+WS2812B RGB LED strip.
