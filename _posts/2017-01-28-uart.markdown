@@ -145,26 +145,6 @@ All of these changes can be seen [on github][commit].
 
 [commit]: https://github.com/branan/teensy/commit/59442ed871c59a0de80af3ab828f01aa9531dd3a
 
-### Updating the linker script
-
-Bringing in these crates also requires a small change to our linker
-script. The bit_field crate contains a bunch of strings, since it can
-panic on certain overflow errors. We need to be sure that those
-strings end up in the Teensy's flash.
-
-If we do nothing it will actually work - for now. The linker will put
-all unknown sections right after our last defined section. In this
-case, that means "right after the code", so they will end up at a
-reasonable place in the flash. It is better to be explicit with this,
-so that we do not accidentally break it later. We will add a new
-section to our `layout.ld` to handle these strings:
-
-```
-    .rodata : {
-        *(.rodata*)
-    } > FLASH
-```
-
 ## A more stable clock
 
 When the MK20DX256 boots, it runs off of an internal reference
