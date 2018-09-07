@@ -517,20 +517,17 @@ gone wrong:
 static mut PORT: Option<Port> = None;
 static mut WRITER: Option<Uart<'static, 'static>> = None;
 
-#[lang = "panic_fmt"]
-#[no_mangle]
-#[allow(empty_loop)]
-pub extern fn rust_begin_panic(msg: core::fmt::Arguments,
-                               file: &'static str,
-                               line: u32) -> ! {
+#[panic_handler]
+fn teensy_panic(pi: &core::panic::PanicInfo) -> ! {
     if let Some(uart) = unsafe { WRITER.as_mut() } {
-        write!(uart, "panicked at '").unwrap();
-        uart.write_fmt(msg).unwrap();
-        write!(uart, "', {}:{}\n", file, line).unwrap();
+        write!(uart, "Panic occured! ");
+        if let Some(format_args) = pi.message() {
+            core::fmt::write(uart, *format_args).unwrap();
+        }
     }
 
     // Reset the MCU after we've printed our panic.
-    let mut aircr = unsafe {
+    let aircr = unsafe {
         &mut *(0xE000ED0C as *mut Volatile<u32>)
     };
     aircr.write(0x05FA0004);
