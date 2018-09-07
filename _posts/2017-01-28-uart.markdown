@@ -94,15 +94,15 @@ impl Watchdog {
     }
 
     pub fn disable(&mut self) {
-        self.unlock.write(0xC520);
-        self.unlock.write(0xD928);
         unsafe {
+            self.unlock.write(0xC520);
+            self.unlock.write(0xD928);
             asm!("nop" : : : "memory");
             asm!("nop" : : : "memory");
+            self.stctrlh.update(|ctrl| {
+                ctrl.set_bit(0, false);
+            });
         }
-        self.stctrlh.update(|ctrl| {
-            ctrl.set_bit(0, false);
-        });
     }
 }
 {% endhighlight %}
@@ -113,13 +113,12 @@ without requiring any changes to our struct layout. The `new` function
 is unchanged, and is still unafe. Most of the change comes in the
 `disable` method.
 
-We no longer need the entire body of this function to be unsafe - we
-now mark only the inline assembly as such. The unlock writes at the
-start of the method are much easier to read than they were with the
-`core::ptr::write_volatile` method. Our read-modify-write of the
-`ctrlh` register is also clearly marked by the `update` method, and
-the `set_bit` function makes it clear what we're doing to the register
-bits.
+Even though updating these `Volatile` values is no longer unsafe, we
+still need to keep this function marked as `unsafe`. Rust considers
+certain interactions with packed structs to be `unsafe` since they can
+violate platform alignment constraints. This should never happen when
+doing register accesses like this, but unfortunately the compiler does
+not know that.
 
 ### Other Structs
 
@@ -141,9 +140,9 @@ as unsafe. Now that we aren't forced to use unsafe for all register
 accesses, it becomes more obvious that this code requires special
 care.
 
-All of these changes can be seen [on github][commit].
+All of these changes can be seen [on github][branan].
 
-[commit]: https://github.com/branan/teensy/commit/59442ed871c59a0de80af3ab828f01aa9531dd3a
+[branch]: https://github.com/branan/teensy/tree/post_2
 
 ## A more stable clock
 
