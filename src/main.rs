@@ -1,7 +1,12 @@
-#![feature(asm,panic_handler,panic_info_message)]
+#![feature(asm,panic_handler,panic_info_message,tool_lints)]
 #![no_std]
 #![no_main]
 #![no_builtins]
+
+#![deny(warnings)]
+#![allow(unknown_lints)]
+#![allow(clippy::unreadable_literal)]
+#![allow(clippy::empty_loop)]
 
 extern crate volatile;
 extern crate bit_field;

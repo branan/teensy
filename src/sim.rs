@@ -88,7 +88,9 @@ impl Sim {
         clkdiv.set_bits(28..32, core-1);
         clkdiv.set_bits(24..28, bus-1);
         clkdiv.set_bits(16..20, flash-1);
-        self.reg.clkdiv1.write(clkdiv);
+        unsafe {
+            self.reg.clkdiv1.write(clkdiv);
+        }
     }
 }
 
