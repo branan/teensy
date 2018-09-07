@@ -10,8 +10,8 @@ Categories: teensy
 This post explains how to get a minimal application booting on a
 Teensy 3.2. Further blog posts will explain how to access the various
 hardware features of this chip. The goal of this tutorial series is to
-teach how to build safe hardware abstractions in Rust. As such,
-existing libraries for embedded devices will not be used.
+explore building safe hardware abstractions in Rust. As such, existing
+libraries for embedded devices will not be used.
 
 The [Teensy][teensy] family is a set inexpensive embedded
 development boards, originally designed to be programmed using the
@@ -64,35 +64,27 @@ create safe interfaces for these unsafe memory accesses.
 ## Development Environment
 
 Currently, embedded development requires the use of nightly
-Rust. Nightly is needed for implementing [language items][lang-items],
-as well as for any inline assembly we use. We'll use [Rustup][rustup]
-to install nightly Rust. We will also rely on a tool called
-[xargo][xargo] to help with some of the complexity involved in
-targeting an embedded environment. Xargo can be installed using cargo.
+Rust. Nightly is needed for specifying our custom panic handler, as
+well as for any inline assembly we use. We'll use [Rustup][rustup] to
+install nightly Rust.
 
 {% highlight shell %}
 $ rustup toolchain install nightly
-$ rustup component add rust-src --toolchain=nightly
-$ cargo install xargo
+$ rustup component add --target thumbv7em-none-eabi rust-std --toolchain=nightly
 {% endhighlight %}
 
-The `rust-src` component is used by xargo to build a working `libcore`
-for our target environment.
+We need to add the appropriate stdlib for the architecture we're
+targeting. For the Teensy 3.2, this is `thumbv7em-none-eabi`. This
+provides the `core` crate that our embedded application will be linked
+against.
 
-You will also need gcc and binutils that target embedded ARM
-microcontrollers. Rust relies on these for its linking step, and
-binutils contains useful tools for inspecting and modifying our
-binaries. How to install these is very dependent on your operating
-system. For Arch, it looks like this:
-
-{% highlight shell %}
-$ sudo pacman -S arm-none-eabi-gcc
-{% endhighlight %}
-
-On MacOS, you can get an appropriate GCC from Homebrew:
+Modern nightly versions of rust provide `lld`, the LLVM
+linker. However, we still require `binutils` in order to convert our
+binary to a format which can be loaded onto the teensy. For arch, we
+install binutils like so:
 
 {% highlight shell %}
-$ brew cask install gcc-arm-embedded
+$ sudo pacman -S arm-none-eabi-binutils
 {% endhighlight %}
 
 Finally, you'll want to get the [Teensy Loader][teensy-loader]. This
@@ -101,8 +93,6 @@ Teensy. If you are on Linux, it may also be available through your
 package manager.
 
 [rustup]: https://rustup.rs/
-[xargo]: https://github.com/japaric/xargo
-[lang-items]: https://doc.rust-lang.org/book/lang-items.html
 [teensy-loader]: https://www.pjrc.com/teensy/loader_cli.html
 
 ## Code Overview
@@ -152,7 +142,7 @@ a few major changes to `src/main.rs` that we'll need to make. Here's the
 new code, with explanations below:
 
 {% highlight rust %}
-#![feature(lang_items,asm)]
+#![feature(asm,panic_handler)]
 #![no_std]
 #![no_main]
 
@@ -162,15 +152,15 @@ pub extern fn main() {
 }
 {% endhighlight %}
 
-The first line enables *inline assembly* and *language items* - these
-ares the reason we need nightly Rust. The next two lines actually
-disable features of the Rust environment - the standard library, and
-the `main` wrapper. The Rust standard library relies on a full
-operating system, and can't typically be used for embedded
-development. Instead, we will have access to *libcore*, which is the
-subset of `std` that is available without an OS. Similarly, the `main`
-wrapper is used for application setup tasks that aren't necessary in
-embedded programs.
+The first line enables *inline assembly* and specifying a custom
+*panic handler* - these ares the reason we need nightly Rust. The next
+two lines actually disable features of the Rust environment - the
+standard library, and the `main` wrapper. The Rust standard library
+relies on a full operating system, and can't typically be used for
+embedded development. Instead, we will have access to *libcore*, which
+is the subset of `std` that is available without an OS. Similarly, the
+`main` wrapper is used for application setup tasks that aren't
+necessary in embedded programs.
 
 Lastly, we've marked `main` as an *extern* function, and added an
 infinite loop to it. *Extern* tells the Rust compiler that this
@@ -187,17 +177,15 @@ The Rust compiler relies on certain functionality to be defined by the
 standard library. Unfortunately for us, we just disabled it. This
 means that we are responsible for providing these features.
 
-For now, the only language item we're responsible for is
-*panic_fmt*. This is the function that gets called to display a
-message when our code panics. We will eventually want to pass these
-messages along to the user, but initially we will ignore them and hang
-the program.
+For now, the only language feature we're responsible for is the *panic
+handler*. This is the function that gets called to display a message
+when our code panics. We will eventually want to pass these messages
+along to the user, but initially we will ignore them and hang the
+program.
 
 {% highlight rust %}
-#[lang = "panic_fmt"]
-pub extern fn rust_begin_panic(_msg: core::fmt::Arguments,
-                               _file: &'static str,
-                               _line: u32) -> ! {
+#[panic_handler]
+fn teensy_panic(_pi: &core::panic::PanicInfo) -> ! {
     loop {};
 }
 {% endhighlight %}
@@ -277,6 +265,10 @@ SECTIONS
         *(.text*)
     } > FLASH = 0xFF
 
+    .rodata : {
+        *(.rodata*)
+    } > FLASH
+
     _stack_top = ORIGIN(RAM) + LENGTH(RAM);
 
     /DISCARD/ : {
@@ -290,7 +282,8 @@ We begin by specifying the address ranges of both `FLASH` and
 memory. We start with the interrupt table in the first 1024
 bytes. After that comes the flash configuration at address 0x0400. The
 rest of flash can be laid out however we want. For now, we add our
-program code right after the configuration block.
+program code and read-only data right after the flash configuration
+block.
 
 This file also specifies the address of `_stack_top` as the highest
 available memory address. Since we currently have no other data in
@@ -310,21 +303,16 @@ with a cargo configuration file, which must be named `.cargo/config`.
 [target.thumbv7em-none-eabi]
 rustflags = [
     "-C", "link-arg=-Tlayout.ld",
-    "-C", "link-arg=-nostartfiles",
 ]
 {% endhighlight %}
-
-This also adds the `-nostartfiles` flag. This is the linker's
-equivalent of Rust's `no_std`, disabling functionality that depends on
-an operating system.
 
 ### The Makefile
 
 Building our project is a three-step process:
 
-* Use xargo to compile the rust code for the target processor
+* Use cargo to compile the rust code for the target processor
 * Convert the built program to the right format with objcopy
-* Flash our code to the Teensy with teensy_loader_cli
+* Flash our code to the Teensy with `teensy_loader_cli`
 
 This sort of repetitive sequenced work is exactly what Makefiles were
 designed for. Ours isn't particularly complicated:
@@ -339,7 +327,7 @@ all:: $(ELF)
 
 .PHONY: $(ELF)
 $(ELF):
-	~/.cargo/bin/xargo build --target=thumbv7em-none-eabi --release
+	cargo build --target=thumbv7em-none-eabi --release
 
 $(HEX): $(ELF)
 	arm-none-eabi-objcopy -O ihex $(ELF) $(HEX)
@@ -493,6 +481,7 @@ The complete code for `src/sim.rs` is here:
 {% highlight rust %}
 use core;
 
+#[derive(Clone,Copy)]
 pub enum Clock {
     PortC,
 }
@@ -580,6 +569,7 @@ We'll start out with a port implementation in `src/port.rs`.
 {% highlight rust %}
 use core;
 
+#[derive(Clone,Copy)]
 pub enum PortName {
     C
 }
@@ -728,7 +718,7 @@ impl Gpio {
             PortName::C => 0x43FE1000 as *mut GpioBitband
         };
 
-        Gpio { gpio: gpio, pin: pin }
+        Gpio { gpio, pin }
     }
 
     pub fn output(&mut self) {
