@@ -52,7 +52,7 @@ impl Sim {
         let reg = unsafe {
             &mut *(0x40047000 as *mut SimRegs)
         };
-        Sim {reg: reg}
+        Sim {reg}
     }
 
     pub fn port(&mut self, port: PortName) -> Port {

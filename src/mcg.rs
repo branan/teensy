@@ -55,7 +55,7 @@ impl Mcg {
             panic!("Cannot initialize MCG: It's already active");
         }
         let reg = unsafe { &mut *(0x40064000 as *mut McgRegs) };
-        Mcg {reg: reg}
+        Mcg {reg}
     }
 
     pub fn clock(self) -> Clock {
