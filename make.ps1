@@ -18,7 +18,7 @@ $HEX="$OUTDIR/$BIN.hex"
 $ELF="$OUTDIR/$BIN"
 
 if ($clean) {
-	xargo clean
+	cargo clean
 	if (-Not $?) {
 		# Stop the script on error result from the previous command
 		exit
@@ -26,20 +26,20 @@ if ($clean) {
 }
 
 if ($test) {
-	xargo test
+	cargo test
 	if (-Not $?) {
 		exit
 	}
 }
 
 if ($bench) {
-	xargo bench
+	cargo bench
 	if (-Not $?) {
 		exit
 	}
 }
 
-xargo build --target=$TARGET --release
+cargo build --target=$TARGET --release
 if (-Not $?) {
 	exit
 }
