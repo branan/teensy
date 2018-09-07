@@ -197,8 +197,10 @@ the *interrupt table*. This contains the initial stack pointer and
 reset vector that was mentioned earlier. The second is the *flash
 configuration*. This is a block of 16 bytes which control how the
 flash can be read and written. The Teensy bootloader makes assumptions
-about these values, so we will use the same set of bytes as the [Teensy
-Arduino tooling][flashconfig].
+about these values, so we will use the same set of bytes as the
+[Teensy Arduino tooling][flashconfig]. Specifically, we disable all
+flash security through the `FSEC` field, and tell the processor to
+boot into high-power mode with `FOPT`.
 
 [flashconfig]: https://github.com/PaulStoffregen/cores/blob/master/teensy3/mk20dx128.c#L654-L658
 
