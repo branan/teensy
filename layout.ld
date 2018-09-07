@@ -19,7 +19,6 @@ SECTIONS
         *(.rodata*)
     } > FLASH
 
-
     _stack_top = ORIGIN(RAM) + LENGTH(RAM);
 
     /DISCARD/ : {

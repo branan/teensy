@@ -1,6 +1,7 @@
 use volatile::Volatile;
 use bit_field::BitField;
 
+#[derive(Clone,Copy)]
 pub enum Clock {
     PortB,
     PortC,

@@ -1,6 +1,4 @@
-#![feature(lang_items,asm,plugin)]
-#![plugin(clippy)]
-//#![deny(warnings)]
+#![feature(asm,panic_handler)]
 #![no_std]
 #![no_main]
 
@@ -16,7 +14,6 @@ mod watchdog;
 
 use core::fmt::Write;
 
-#[allow(empty_loop)]
 extern fn main() {
     let (wdog,sim,mcg,osc,pin) = unsafe {
         (watchdog::Watchdog::new(),
@@ -54,7 +51,7 @@ extern fn main() {
         panic!("Somehow the clock wasn't in FEI mode");
     }
 
-    let mut uart = unsafe {
+    let uart = unsafe {
         let rx = port::Port::new(port::PortName::B).pin(16).make_rx();
         let tx = port::Port::new(port::PortName::B).pin(17).make_tx();
         uart::Uart::new(0, Some(rx), Some(tx), (468, 24))
@@ -88,11 +85,7 @@ pub static _FLASHCONFIG: [u8; 16] = [
     0xFF, 0xFF, 0xFF, 0xFF, 0xDE, 0xF9, 0xFF, 0xFF
 ];
 
-#[lang = "panic_fmt"]
-#[no_mangle]
-#[allow(empty_loop)]
-pub extern fn rust_begin_panic(_msg: core::fmt::Arguments,
-                               _file: &'static str,
-                               _line: u32) -> ! {
+#[panic_handler]
+fn teensy_panic(_pi: &core::panic::PanicInfo) -> ! {
     loop {};
 }

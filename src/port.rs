@@ -1,6 +1,7 @@
 use volatile::Volatile;
 use bit_field::BitField;
 
+#[derive(Clone,Copy)]
 pub enum PortName {
     B,
     C
@@ -109,7 +110,7 @@ impl Gpio {
             PortName::C => 0x43FE1000 as *mut GpioBitband
         };
 
-        Gpio { gpio: gpio, pin: pin }
+        Gpio { gpio, pin }
     }
 
     pub fn output(&mut self) {
