@@ -1,5 +1,6 @@
 use core;
 
+#[derive(Clone,Copy)]
 pub enum Clock {
     PortC,
 }

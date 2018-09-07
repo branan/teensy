@@ -15,6 +15,10 @@ SECTIONS
         *(.text*)
     } > FLASH = 0xFF
 
+    .rodata : {
+        *(.rodata*)
+    } > FLASH
+
     _stack_top = ORIGIN(RAM) + LENGTH(RAM);
 
     /DISCARD/ : {
