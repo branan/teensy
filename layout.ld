@@ -26,7 +26,6 @@ SECTIONS
          _bss_end = .;
     } > RAM
 
-
     _stack_top = ORIGIN(RAM) + LENGTH(RAM);
 
     /DISCARD/ : {

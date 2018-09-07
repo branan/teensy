@@ -1,6 +1,4 @@
-#![feature(lang_items,asm,plugin,drop_types_in_const)]
-#![plugin(clippy)]
-#![deny(warnings)]
+#![feature(asm,panic_handler,panic_info_message)]
 #![no_std]
 #![no_main]
 #![no_builtins]
@@ -29,7 +27,6 @@ use volatile::Volatile;
 static mut PORT: Option<Port> = None;
 static mut WRITER: Option<Uart<'static, 'static>> = None;
 
-#[allow(empty_loop)]
 extern fn main() {
     unsafe {
         Watchdog::new().disable();
@@ -109,20 +106,17 @@ pub static _FLASHCONFIG: [u8; 16] = [
     0xFF, 0xFF, 0xFF, 0xFF, 0xDE, 0xF9, 0xFF, 0xFF
 ];
 
-#[lang = "panic_fmt"]
-#[no_mangle]
-#[allow(empty_loop)]
-pub extern fn rust_begin_panic(msg: core::fmt::Arguments,
-                               file: &'static str,
-                               line: u32) -> ! {
+#[panic_handler]
+fn teensy_panic(pi: &core::panic::PanicInfo) -> ! {
     if let Some(uart) = unsafe { WRITER.as_mut() } {
-        write!(uart, "panicked at '").unwrap();
-        uart.write_fmt(msg).unwrap();
-        write!(uart, "', {}:{}\n", file, line).unwrap();
+        write!(uart, "Panic occured! ");
+        if let Some(format_args) = pi.message() {
+            core::fmt::write(uart, *format_args).unwrap();
+        }
     }
 
     // Reset the MCU after we've printed our panic.
-    let mut aircr = unsafe {
+    let aircr = unsafe {
         &mut *(0xE000ED0C as *mut Volatile<u32>)
     };
     aircr.write(0x05FA0004);

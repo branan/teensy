@@ -7,7 +7,7 @@ all:: $(ELF)
 
 .PHONY: $(ELF)
 $(ELF):
-	~/.cargo/bin/xargo build --target=thumbv7em-none-eabi --release
+	cargo build --target=thumbv7em-none-eabi --release
 
 $(HEX): $(ELF)
 	arm-none-eabi-objcopy -O ihex $(ELF) $(HEX)

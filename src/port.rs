@@ -6,6 +6,7 @@ use core::sync::atomic::{AtomicBool,Ordering};
 
 use super::ClockGate;
 
+#[derive(Clone,Copy)]
 pub enum PortName {
     B,
     C
@@ -156,7 +157,7 @@ impl <'a> Gpio<'a>  {
             PortName::C => 0x43FE1000 as *mut GpioBitband
         };
 
-        Gpio { gpio: gpio, pin: pin }
+        Gpio { gpio, pin }
     }
 
     pub fn output(&mut self) {
