@@ -42,21 +42,23 @@ impl Sim {
     }
 
     pub fn enable_clock(&mut self, clock: Clock) {
-        match clock {
-            Clock::PortC => {
-                self.scgc5.update(|scgc| {
-                    scgc.set_bit(11, true);
-                });
-            }
-            Clock::PortB => {
-                self.scgc5.update(|scgc| {
-                    scgc.set_bit(10, true);
-                });
-            }
-            Clock::Uart0 => {
-                self.scgc4.update(|scgc| {
-                    scgc.set_bit(10, true);
-                });
+        unsafe {
+            match clock {
+                Clock::PortC => {
+                    self.scgc5.update(|scgc| {
+                        scgc.set_bit(11, true);
+                    });
+                }
+                Clock::PortB => {
+                    self.scgc5.update(|scgc| {
+                        scgc.set_bit(10, true);
+                    });
+                }
+                Clock::Uart0 => {
+                    self.scgc4.update(|scgc| {
+                        scgc.set_bit(10, true);
+                    });
+                }
             }
         }
     }
@@ -66,6 +68,8 @@ impl Sim {
         clkdiv.set_bits(28..32, core-1);
         clkdiv.set_bits(24..28, bus-1);
         clkdiv.set_bits(16..20, flash-1);
-        self.clkdiv1.write(clkdiv);
+        unsafe {
+            self.clkdiv1.write(clkdiv);
+        }
     }
 }

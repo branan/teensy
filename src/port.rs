@@ -115,13 +115,13 @@ impl Gpio {
 
     pub fn output(&mut self) {
         unsafe {
-            (&mut (*self.gpio)).pddr[self.pin].write(1);
+            (*self.gpio).pddr[self.pin].write(1);
         }
     }
 
     pub fn high(&mut self) {
         unsafe {
-            (&mut (*self.gpio)).psor[self.pin].write(1);
+            (*self.gpio).psor[self.pin].write(1);
         }
     }
 }

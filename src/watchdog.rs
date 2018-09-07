@@ -23,14 +23,14 @@ impl Watchdog {
     }
 
     pub fn disable(&mut self) {
-        self.unlock.write(0xC520);
-        self.unlock.write(0xD928);
         unsafe {
+            self.unlock.write(0xC520);
+            self.unlock.write(0xD928);
             asm!("nop" : : : "memory");
             asm!("nop" : : : "memory");
+            self.stctrlh.update(|ctrl| {
+                ctrl.set_bit(0, false);
+            });
         }
-        self.stctrlh.update(|ctrl| {
-            ctrl.set_bit(0, false);
-        });
     }
 }
