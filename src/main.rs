@@ -6,6 +6,7 @@
 #![allow(unknown_lints)]
 #![allow(clippy::unreadable_literal)]
 #![allow(clippy::empty_loop)]
+#![allow(clippy::needless_pass_by_value)]
 
 extern crate volatile;
 extern crate bit_field;
