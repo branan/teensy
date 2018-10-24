@@ -1,4 +1,4 @@
-#![feature(asm,panic_handler,tool_lints)]
+#![feature(asm)]
 #![no_std]
 #![no_main]
 
