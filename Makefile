@@ -7,11 +7,11 @@ all:: $(ELF)
 
 .PHONY: $(ELF)
 $(ELF):
-	cargo build --target=thumbv7em-none-eabi --release
+	cargo build --release
 
 $(HEX): $(ELF)
 	arm-none-eabi-objcopy -O ihex $(ELF) $(HEX)
 
 .PHONY: flash
 flash: $(HEX)
-	teensy-loader-cli -w -mmcu=mk20dx256 $(HEX) -v
+	teensy_loader_cli -w -mmcu=mk20dx256 $(HEX) -v
