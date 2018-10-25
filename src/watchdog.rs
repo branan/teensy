@@ -1,4 +1,5 @@
 use core;
+use core::arch::arm::__NOP;
 
 #[repr(C,packed)]
 pub struct Watchdog {
@@ -25,8 +26,8 @@ impl Watchdog {
         unsafe {
             core::ptr::write_volatile(&mut self.unlock, 0xC520);
             core::ptr::write_volatile(&mut self.unlock, 0xD928);
-            asm!("nop" : : : "memory");
-            asm!("nop" : : : "memory");
+            __NOP();
+            __NOP();
             let mut ctrl = core::ptr::read_volatile(&self.stctrlh);
             ctrl &= !(0x00000001);
             core::ptr::write_volatile(&mut self.stctrlh, ctrl);
