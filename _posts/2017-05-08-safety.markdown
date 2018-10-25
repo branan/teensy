@@ -405,7 +405,7 @@ of the pins it is using, both to prevent the associated `Port` from
 being dropped, and to keep the pins themselves from being used
 elsewhere.
 
-We'll start by adding a `::Uart` method to the `Sim`, to do the
+We'll start by adding a `::uart` method to the `Sim`, to do the
 allocation, and go from there by updating the `Uart` struct itself to
 own the various necessary structs. These are actually simpler changes
 than were necessary for the `Port` struct - we already did most of the

@@ -63,10 +63,10 @@ create safe interfaces for these unsafe memory accesses.
 
 ## Development Environment
 
-Currently, embedded development requires the use of nightly
-Rust. Nightly is needed for specifying our custom panic handler, as
-well as for any inline assembly we use. We'll use [Rustup][rustup] to
-install nightly Rust.
+Currently, embedded development requires the use of nightly Rust to be
+practical. While many things can now be done with stable rust, we will
+still need a nightly version to access some specific hardware
+instructions. We'll use [Rustup][rustup] to install nightly Rust.
 
 {% highlight shell %}
 $ rustup toolchain install nightly
@@ -142,7 +142,7 @@ a few major changes to `src/main.rs` that we'll need to make. Here's the
 new code, with explanations below:
 
 {% highlight rust %}
-#![feature(asm,panic_handler)]
+#![feature(stdsimd)]
 #![no_std]
 #![no_main]
 
@@ -152,15 +152,14 @@ pub extern fn main() {
 }
 {% endhighlight %}
 
-The first line enables *inline assembly* and specifying a custom
-*panic handler* - these ares the reason we need nightly Rust. The next
-two lines actually disable features of the Rust environment - the
-standard library, and the `main` wrapper. The Rust standard library
-relies on a full operating system, and can't typically be used for
-embedded development. Instead, we will have access to *libcore*, which
-is the subset of `std` that is available without an OS. Similarly, the
-`main` wrapper is used for application setup tasks that aren't
-necessary in embedded programs.
+The first line enables the use of *intrinsics*, and is the reason we
+need nightly Rust. The next two lines actually disable features of the
+Rust environment - the standard library, and the `main` wrapper. The
+Rust standard library relies on a full operating system, and can't
+typically be used for embedded development. Instead, we will have
+access to *libcore*, which is the subset of `std` that is available
+without an OS. Similarly, the `main` wrapper is used for application
+setup tasks that aren't necessary in embedded programs.
 
 Lastly, we've marked `main` as an *extern* function, and added an
 infinite loop to it. *Extern* tells the Rust compiler that this
@@ -301,9 +300,14 @@ binary, and would waste space in our constrained environment.
 ### Rust Linker Configuration
 
 Rust will not use our linker script until we tell it to. This is done
-with a cargo configuration file, which must be named `.cargo/config`.
+with a cargo configuration file, which must be named
+`.cargo/config`. While we're here, we'll also tell Cargo to target our
+microcontroller.
 
 {% highlight toml %}
+[build]
+target = "thumbv7em-none-eabi"
+
 [target.thumbv7em-none-eabi]
 rustflags = [
     "-C", "link-arg=-Tlayout.ld",
@@ -331,7 +335,7 @@ all:: $(ELF)
 
 .PHONY: $(ELF)
 $(ELF):
-	cargo build --target=thumbv7em-none-eabi --release
+	cargo build --release
 
 $(HEX): $(ELF)
 	arm-none-eabi-objcopy -O ihex $(ELF) $(HEX)
@@ -422,6 +426,8 @@ The watchdog's implementation looks like this. Note that `new` is
 unsafe, but `disable` is safe.
 
 {% highlight rust %}
+use core::arch::arm::__NOP;
+
 impl Watchdog {
     pub unsafe fn new() -> &'static mut Watchdog {
         &mut *(0x40052000 as *mut Watchdog)
@@ -431,8 +437,8 @@ impl Watchdog {
         unsafe {
             core::ptr::write_volatile(&mut self.unlock, 0xC520);
             core::ptr::write_volatile(&mut self.unlock, 0xD928);
-            asm!("nop" : : : "memory");
-            asm!("nop" : : : "memory");
+            __NOP();
+            __NOP();
             let mut ctrl = core::ptr::read_volatile(&self.stctrlh);
             ctrl &= !(0x00000001);
             core::ptr::write_volatile(&mut self.stctrlh, ctrl);
@@ -446,8 +452,8 @@ manufacturer's data sheet. The watchdog is protected against being
 accidentally disabled by a random write to memory, so our code must
 "unlock" it first, by writing special values to the unlock
 register. Once that's done, we need to wait for the watchdog to
-actually unlock itself. The `nop` assembly instruction tells the
-processor to briefly do nothing. This introduces our necessary 2-cycle
+actually unlock itself. The `__NOP` intrinsic tells the processor to
+briefly do nothing. This introduces our necessary 2-cycle
 delay. Finally, we read the control register and un-set the "enable"
 bit.
 
