@@ -1,6 +1,8 @@
 use volatile::Volatile;
 use bit_field::BitField;
 
+use core::arch::arm::__NOP;
+
 #[repr(C,packed)]
 pub struct Watchdog {
     stctrlh: Volatile<u16>,
@@ -26,8 +28,8 @@ impl Watchdog {
         unsafe {
             self.unlock.write(0xC520);
             self.unlock.write(0xD928);
-            asm!("nop" : : : "memory");
-            asm!("nop" : : : "memory");
+            __NOP();
+            __NOP();
             self.stctrlh.update(|ctrl| {
                 ctrl.set_bit(0, false);
             });

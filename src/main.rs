@@ -1,4 +1,4 @@
-#![feature(asm,panic_info_message)]
+#![feature(panic_info_message,stdsimd)]
 #![no_std]
 #![no_main]
 #![no_builtins]
