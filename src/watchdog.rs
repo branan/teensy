@@ -26,8 +26,8 @@ impl Watchdog {
         unsafe {
             self.unlock.write(0xC520);
             self.unlock.write(0xD928);
-            asm!("nop" : : : "memory");
-            asm!("nop" : : : "memory");
+            llvm_asm!("nop" : : : "memory");
+            llvm_asm!("nop" : : : "memory");
             self.stctrlh.update(|ctrl| {
                 ctrl.set_bit(0, false);
             });

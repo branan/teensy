@@ -4,7 +4,7 @@ use bit_field::BitField;
 
 use super::OscToken;
 
-use core::sync::atomic::{AtomicBool,ATOMIC_BOOL_INIT,Ordering};
+use core::sync::atomic::{AtomicBool,Ordering};
 
 #[repr(C,packed)]
 struct McgRegs {
@@ -46,7 +46,7 @@ pub enum Clock {
     Pbe(Pbe)
 }
 
-static MCG_INIT: AtomicBool = ATOMIC_BOOL_INIT;
+static MCG_INIT: AtomicBool = AtomicBool::new(false);
 
 impl Mcg {
     pub fn new() -> Mcg {
