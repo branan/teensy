@@ -1,4 +1,4 @@
-#![feature(asm,panic_info_message)]
+#![feature(llvm_asm,panic_info_message)]
 #![no_std]
 #![no_main]
 #![no_builtins]
@@ -118,9 +118,15 @@ pub static _FLASHCONFIG: [u8; 16] = [
 #[panic_handler]
 fn teensy_panic(pi: &core::panic::PanicInfo) -> ! {
     if let Some(uart) = unsafe { WRITER.as_mut() } {
-        write!(uart, "Panic occured! ");
-        if let Some(format_args) = pi.message() {
-            core::fmt::write(uart, *format_args).unwrap();
+        match write!(uart, "Panic occured! ") {
+            Ok(_) => {
+                if let Some(format_args) = pi.message() {
+                    core::fmt::write(uart, *format_args).unwrap();
+                }
+            },
+            Err(_) => {
+                // Failed to write panic message to UART
+            }
         }
     }
 
