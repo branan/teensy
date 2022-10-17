@@ -46,12 +46,16 @@ impl Port {
     }
 
     pub unsafe fn set_pin_mode(&mut self, p: usize, mut mode: u32) {
-        let mut pcr = core::ptr::read_volatile(&self.pcr[p]);
+
+        let brw = self.pcr[p];
+        // let mut pcr = core::ptr::read_volatile(&self.pcr[p]);
+        let mut pcr = core::ptr::read_volatile(&brw);
         pcr &= 0xFFFFF8FF;
         mode &= 0x00000007;
         mode <<= 8;
         pcr |= mode;
-        core::ptr::write_volatile(&mut self.pcr[p], pcr);
+        let mut brw = self.pcr[p];
+        core::ptr::write_volatile(&mut brw, pcr);
     }
 
     pub fn name(&self) -> PortName {
@@ -84,13 +88,17 @@ impl Gpio {
 
     pub fn output(&mut self) {
         unsafe {
-            core::ptr::write_volatile(&mut (*self.gpio).pddr[self.pin], 1);
+            let mut brw = (*self.gpio).pddr[self.pin];
+            // core::ptr::write_volatile(&mut (*self.gpio).pddr[self.pin], 1);
+            core::ptr::write_volatile(&mut brw, 1);
         }
     }
 
     pub fn high(&mut self) {
         unsafe {
-            core::ptr::write_volatile(&mut (*self.gpio).psor[self.pin], 1);
+            let mut brw = (*self.gpio).psor[self.pin];
+            // core::ptr::write_volatile(&mut (*self.gpio).psor[self.pin], 1);
+            core::ptr::write_volatile(&mut brw, 1);
         }
     }
 }
