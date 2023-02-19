@@ -42,9 +42,10 @@ impl Sim {
         unsafe {
             match clock {
                 Clock::PortC => {
-                    let mut scgc = core::ptr::read_volatile(&self.scgc5);
+                    let scgc_ptr = core::ptr::addr_of_mut!(self.scgc5);
+                    let mut scgc = scgc_ptr.read_volatile();
                     scgc |= 0x00000800;
-                    core::ptr::write_volatile(&mut self.scgc5, scgc);
+                    scgc_ptr.write_volatile(scgc);
                 }
             }
         }
